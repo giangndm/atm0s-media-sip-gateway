@@ -4,13 +4,28 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+async-trait = "0.1.83"
 clap = { version = "4.5.18", features = ["derive", "env"] }
+derive_more = { version = "1.0.0", features = [
+    "from",
+    "display",
+    "deref",
+    "into",
+] }
 ezk-sdp-types = "0.3.0"
+ezk-sip-auth = "0.1.2"
 ezk-sip-core = "0.3.0"
+ezk-sip-types = "0.2.1"
 ezk-sip-ua = "0.4.2"
+ipnet = { version = "2.10.0", features = ["serde"] }
 log = "0.4.22"
+pin-project-lite = "0.2.14"
 poem = { version = "3.1.0", features = ["websocket"] }
 poem-openapi = { version = "5.1.1", features = ["swagger-ui"] }
+rand = "0.8.5"
+reqwest = { version = "0.12.7", features = ["json"] }
+serde = "1.0.210"
+spin = "0.9.8"
 thiserror = "1.0.64"
 tokio = { version = "1.40.0", features = ["full"] }
 tracing-subscriber = "0.3.18"

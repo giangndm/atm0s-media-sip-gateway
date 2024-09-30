@@ -1,41 +1,16 @@
-use poem_openapi::{param::Path, payload::Json, Object, OpenApi};
-use thiserror::Error;
+use poem_openapi::{param::Path, payload::Json, OpenApi};
+use tokio::sync::{mpsc::Sender, oneshot};
 
-use crate::protocol::{OutgoingCallAction, SipAuth, StreamingInfo};
+use crate::protocol::{
+    CallApiError, CreateCallRequest, CreateCallResponse, UpdateCallRequest, UpdateCallResponse,
+};
 
-use super::{header_xapi_key::HeaderXApiKey, response_result::ApiRes};
+use super::{header_xapi_key::HeaderXApiKey, response_result::ApiRes, HttpCommand};
 
-#[derive(Debug, Object)]
-pub struct CreateCallRequest {
-    sip_server: String,
-    sip_auth: SipAuth,
-    from_number: String,
-    to_number: String,
-    hook: String,
-    streaming: StreamingInfo,
+pub struct CallApis {
+    pub secret: String,
+    pub tx: Sender<HttpCommand>,
 }
-
-#[derive(Debug, Object)]
-pub struct CreateCallResponse {
-    call_id: String,
-    ws: String,
-}
-
-#[derive(Debug, Object)]
-pub struct UpdateCallRequest {
-    action: OutgoingCallAction,
-}
-
-#[derive(Debug, Object)]
-pub struct UpdateCallResponse {}
-
-#[derive(Error, Debug)]
-pub enum CallApiError {
-    #[error("Unknown")]
-    Unknown,
-}
-
-pub struct CallApis {}
 
 #[OpenApi]
 impl CallApis {
@@ -45,7 +20,20 @@ impl CallApis {
         secret: HeaderXApiKey,
         data: Json<CreateCallRequest>,
     ) -> ApiRes<CreateCallResponse, CallApiError> {
-        todo!()
+        if self.secret != secret.0.key {
+            return Err(CallApiError::WrongSecret.into());
+        }
+
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(HttpCommand::CreateCall(data.0, tx))
+            .await
+            .map_err(|e| CallApiError::InternalChannel(e.to_string()))?;
+
+        let res = rx
+            .await
+            .map_err(|e| CallApiError::InternalChannel(e.to_string()))??;
+        Ok(res.into())
     }
 
     #[oai(path = "/:call_id", method = "put")]
@@ -55,6 +43,40 @@ impl CallApis {
         Path(call): Path<String>,
         data: Json<UpdateCallRequest>,
     ) -> ApiRes<UpdateCallResponse, CallApiError> {
-        todo!()
+        if self.secret != secret.0.key {
+            return Err(CallApiError::WrongSecret.into());
+        }
+
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(HttpCommand::UpdateCall(call.into(), data.0, tx))
+            .await
+            .map_err(|e| CallApiError::InternalChannel(e.to_string()))?;
+
+        let res = rx
+            .await
+            .map_err(|e| CallApiError::InternalChannel(e.to_string()))??;
+        Ok(res.into())
+    }
+
+    #[oai(path = "/:call_id", method = "delete")]
+    async fn encode_call(
+        &self,
+        secret: HeaderXApiKey,
+        Path(call_id): Path<String>,
+    ) -> ApiRes<String, CallApiError> {
+        if self.secret != secret.0.key {
+            return Err(CallApiError::WrongSecret.into());
+        }
+
+        let (tx, rx) = oneshot::channel();
+        self.tx
+            .send(HttpCommand::EndCall(call_id.into(), tx))
+            .await
+            .map_err(|e| CallApiError::InternalChannel(e.to_string()))?;
+
+        rx.await
+            .map_err(|e| CallApiError::InternalChannel(e.to_string()))??;
+        Ok("OK".to_string().into())
     }
 }
