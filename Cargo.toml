@@ -29,3 +29,4 @@ spin = "0.9.8"
 thiserror = "1.0.64"
 tokio = { version = "1.40.0", features = ["full"] }
 tracing-subscriber = "0.3.18"
+bytes = "1.7"

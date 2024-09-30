@@ -72,7 +72,7 @@ impl Gateway {
     ) {
         let from = format!("sip:{}@{}", req.from_number, req.sip_server);
         let to = format!("sip:{}@{}", req.to_number, req.sip_server);
-        match self.sip.make_call(&from, &to, req.sip_auth) {
+        match self.sip.make_call(&from, &to, req.sip_auth, req.streaming) {
             Ok(mut call) => {
                 let call_id = call.internal_call_id();
                 match tx.send(Ok(CreateCallResponse {

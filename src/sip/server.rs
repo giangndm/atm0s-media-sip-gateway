@@ -10,7 +10,10 @@ use incoming::InviteAcceptLayer;
 use outgoing::{OutgoingCall, OutgoingCallError};
 use thiserror::Error;
 
-use crate::{address_book::AddressBookStorage, protocol::SipAuth};
+use crate::{
+    address_book::AddressBookStorage,
+    protocol::{SipAuth, StreamingInfo},
+};
 
 mod incoming;
 mod outgoing;
@@ -64,6 +67,7 @@ impl SipServer {
         from: &str,
         to: &str,
         auth: Option<SipAuth>,
+        stream: StreamingInfo,
     ) -> Result<OutgoingCall, OutgoingCallError> {
         OutgoingCall::new(
             self.endpoint.clone(),
@@ -72,6 +76,7 @@ impl SipServer {
             from,
             to,
             auth,
+            stream,
         )
     }
 }

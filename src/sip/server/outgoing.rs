@@ -17,7 +17,8 @@ use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::{
     futures::select2,
-    protocol::{InternalCallId, SipAuth},
+    protocol::{InternalCallId, SipAuth, StreamingInfo},
+    sip::{create_offer, CreateOfferError},
 };
 
 struct OutgoingAuth {
@@ -42,6 +43,8 @@ pub enum OutgoingCallError {
     Sip(u16),
     #[error("InternalChannel")]
     InternalChannel,
+    #[error("RtpEngine{0}")]
+    RtpEngine(#[from] CreateOfferError),
 }
 
 pub enum OutgoingCallControl {
@@ -53,6 +56,7 @@ pub struct OutgoingCall {
     state: InternalState,
     initiator: Initiator,
     auth: Option<OutgoingAuth>,
+    stream: StreamingInfo,
     control_tx: Option<Sender<OutgoingCallControl>>,
     control_rx: Receiver<OutgoingCallControl>,
 }
@@ -65,6 +69,7 @@ impl OutgoingCall {
         from: &str,
         to: &str,
         auth: Option<SipAuth>,
+        stream: StreamingInfo,
     ) -> Result<Self, OutgoingCallError> {
         let internal_call_id: InternalCallId = InternalCallId::random();
         log::info!("[OutgoingCall {internal_call_id}] create with {from} => {to}");
@@ -95,6 +100,7 @@ impl OutgoingCall {
             initiator,
             state: InternalState::Calling { auth_failed: false },
             auth,
+            stream,
             internal_call_id,
             control_tx: Some(control_tx),
             control_rx,
@@ -110,10 +116,15 @@ impl OutgoingCall {
     }
 
     pub async fn run_loop(&mut self) -> Result<(), OutgoingCallError> {
-        let invite = self.initiator.create_invite();
+        let sdp = create_offer(&self.stream.gateway, &self.stream.token).await?;
+        let mut invite = self.initiator.create_invite();
+        invite.body = sdp.sdp.clone();
         self.initiator.send_invite(invite).await?;
         let call_id = self.internal_call_id();
-        log::info!("[OutgoingCall {call_id}] start loop");
+        log::info!(
+            "[OutgoingCall {call_id}] start loop with sdp {}",
+            String::from_utf8_lossy(&sdp.sdp)
+        );
 
         let res = loop {
             let select = select2::or(self.initiator.receive(), self.control_rx.recv()).await;
@@ -126,7 +137,10 @@ impl OutgoingCall {
                     }
                     ezk_sip_ua::invite::initiator::Response::Failure(response) => {
                         if let InternalState::Calling { auth_failed } = &mut self.state {
-                            if *auth_failed {
+                            if response.line.code.into_u16() != 401 {
+                                log::error!("[OutgoingCall {call_id}] error => reject");
+                                break Err(OutgoingCallError::Sip(response.line.code.into_u16()));
+                            } else if *auth_failed {
                                 log::error!(
                                     "[OutgoingCall {call_id}] already has authen error => reject"
                                 );
@@ -189,10 +203,16 @@ impl OutgoingCall {
                 },
                 select2::OrOutput::Right(event) => {
                     match event.ok_or(OutgoingCallError::InternalChannel)? {
-                        OutgoingCallControl::End => {
-                            log::info!("end call");
-                            break Ok(());
-                        }
+                        OutgoingCallControl::End => match &mut self.state {
+                            InternalState::Calling { auth_failed } => {}
+                            InternalState::Early { early } => {}
+                            InternalState::Talking { session } => {
+                                log::info!("[OutgoingCall {call_id}] end call");
+                                session.terminate().await;
+                                break Ok(());
+                            }
+                            InternalState::Destroyed => {}
+                        },
                     }
                 }
             }
