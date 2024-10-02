@@ -31,11 +31,7 @@ impl AddressBookStorage {
             numbers.insert(number.number.clone(), number);
         }
         if numbers.len() != pre_len {
-            log::info!(
-                "[AddressBookStorage] numbers len changed from {} to {}",
-                pre_len,
-                numbers.len()
-            );
+            log::info!("[AddressBookStorage] numbers len changed from {} to {}", pre_len, numbers.len());
         }
     }
 }

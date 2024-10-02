@@ -12,11 +12,11 @@ derive_more = { version = "1.0.0", features = [
     "deref",
     "into",
 ] }
-ezk-sdp-types = "0.3.0"
-ezk-sip-auth = "0.1.2"
-ezk-sip-core = "0.3.0"
-ezk-sip-types = "0.2.1"
-ezk-sip-ua = "0.4.2"
+ezk-sdp-types = { git = "https://github.com/giangndm/ezk.git", branch = "feat-cancel-call" }
+ezk-sip-auth = { git = "https://github.com/giangndm/ezk.git", branch = "feat-cancel-call" }
+ezk-sip-core = { git = "https://github.com/giangndm/ezk.git", branch = "feat-cancel-call" }
+ezk-sip-types = { git = "https://github.com/giangndm/ezk.git", branch = "feat-cancel-call" }
+ezk-sip-ua = { git = "https://github.com/giangndm/ezk.git", branch = "feat-cancel-call" }
 ipnet = { version = "2.10.0", features = ["serde"] }
 log = "0.4.22"
 pin-project-lite = "0.2.14"
@@ -30,3 +30,5 @@ thiserror = "1.0.64"
 tokio = { version = "1.40.0", features = ["full"] }
 tracing-subscriber = "0.3.18"
 bytes = "1.7"
+serde_json = "1.0.128"
+futures-util = "0.3.30"

@@ -13,12 +13,7 @@ pub struct InviteAcceptLayer<V> {
 }
 
 impl<V: IncallValidator> InviteAcceptLayer<V> {
-    pub fn new(
-        contact: Contact,
-        dialog_layer: LayerKey<DialogLayer>,
-        invite_layer: LayerKey<InviteLayer>,
-        validator: V,
-    ) -> Self {
+    pub fn new(contact: Contact, dialog_layer: LayerKey<DialogLayer>, invite_layer: LayerKey<InviteLayer>, validator: V) -> Self {
         Self {
             contact,
             dialog_layer,

@@ -27,11 +27,7 @@ pub struct ApiResPayload<P>(pub P);
 
 impl<P: Type + ToJSON + ParseFromJSON> IntoResponse for ApiResPayload<P> {
     fn into_response(self) -> poem::Response {
-        Json(ApiSuccessJson {
-            status: true,
-            data: self.0,
-        })
-        .into_response()
+        Json(ApiSuccessJson { status: true, data: self.0 }).into_response()
     }
 }
 
@@ -53,20 +49,14 @@ impl<E> From<E> for ApiResError<E> {
 impl<E: Debug + Display> Display for ApiResError<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         log::error!("ApiResError: {}", self.0);
-        f.write_fmt(format_args!(
-            "{{\"status\": false, \"error\": \"{}\"}}",
-            self.0
-        ))
+        f.write_fmt(format_args!("{{\"status\": false, \"error\": \"{}\"}}", self.0))
     }
 }
 
 impl<E: Display + Debug> Debug for ApiResError<E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         log::error!("ApiResError: {:?}", self.0);
-        f.write_fmt(format_args!(
-            "{{\"status\": false, \"error\": \"{}\"}}",
-            self.0
-        ))
+        f.write_fmt(format_args!("{{\"status\": false, \"error\": \"{}\"}}", self.0))
     }
 }
 

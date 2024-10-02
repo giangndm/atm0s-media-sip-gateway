@@ -7,18 +7,17 @@ use ezk_sip_types::{header::typed::Contact, uri::NameAddr};
 use ezk_sip_ua::{
     dialog::DialogLayer,
     invite::{
-        initiator::{Early, Initiator},
+        initiator::{Early, EarlyResponse, Initiator, Response},
         session::Session,
         InviteLayer,
     },
 };
 use thiserror::Error;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
 
 use crate::{
     futures::select2,
-    protocol::{InternalCallId, SipAuth, StreamingInfo},
-    sip::{create_offer, CreateOfferError},
+    protocol::{InternalCallId, OutgoingCallEvent, SipAuth, StreamingInfo},
+    sip::{RtpEngineError, RtpEngineOffer},
 };
 
 struct OutgoingAuth {
@@ -34,7 +33,7 @@ enum InternalState {
 }
 
 #[derive(Error, Debug)]
-pub enum OutgoingCallError {
+pub enum SipOutgoingCallError {
     #[error("EzkCoreError({0})")]
     EzkCore(#[from] ezk_sip_core::Error),
     #[error("EzkAuthError({0})")]
@@ -44,24 +43,23 @@ pub enum OutgoingCallError {
     #[error("InternalChannel")]
     InternalChannel,
     #[error("RtpEngine{0}")]
-    RtpEngine(#[from] CreateOfferError),
+    RtpEngine(#[from] RtpEngineError),
 }
 
-pub enum OutgoingCallControl {
-    End,
+pub enum SipOutgoingCallOut {
+    Event(OutgoingCallEvent),
+    Continue,
 }
 
-pub struct OutgoingCall {
-    internal_call_id: InternalCallId,
+pub struct SipOutgoingCall {
+    call_id: InternalCallId,
     state: InternalState,
     initiator: Initiator,
     auth: Option<OutgoingAuth>,
-    stream: StreamingInfo,
-    control_tx: Option<Sender<OutgoingCallControl>>,
-    control_rx: Receiver<OutgoingCallControl>,
+    rtp: RtpEngineOffer,
 }
 
-impl OutgoingCall {
+impl SipOutgoingCall {
     pub fn new(
         endpoint: Endpoint,
         dialog_layer: LayerKey<DialogLayer>,
@@ -70,20 +68,13 @@ impl OutgoingCall {
         to: &str,
         auth: Option<SipAuth>,
         stream: StreamingInfo,
-    ) -> Result<Self, OutgoingCallError> {
-        let internal_call_id: InternalCallId = InternalCallId::random();
-        log::info!("[OutgoingCall {internal_call_id}] create with {from} => {to}");
+    ) -> Result<Self, SipOutgoingCallError> {
+        let call_id: InternalCallId = InternalCallId::random();
+        log::info!("[SipOutgoingCall {call_id}] create with {from} => {to}");
         let local_uri = endpoint.parse_uri(from).unwrap();
         let target = endpoint.parse_uri(to).unwrap();
 
-        let initiator = Initiator::new(
-            endpoint,
-            dialog_layer,
-            invite_layer,
-            NameAddr::uri(local_uri.clone()),
-            Contact::new(NameAddr::uri(local_uri)),
-            target,
-        );
+        let initiator = Initiator::new(endpoint, dialog_layer, invite_layer, NameAddr::uri(local_uri.clone()), Contact::new(NameAddr::uri(local_uri)), target);
 
         let auth = auth.map(|auth| {
             let mut credentials = CredentialStore::new();
@@ -94,62 +85,83 @@ impl OutgoingCall {
             }
         });
 
-        let (control_tx, control_rx) = channel(10);
-
         Ok(Self {
             initiator,
             state: InternalState::Calling { auth_failed: false },
             auth,
-            stream,
-            internal_call_id,
-            control_tx: Some(control_tx),
-            control_rx,
+            call_id,
+            rtp: RtpEngineOffer::new(&stream.gateway, &stream.token),
         })
     }
 
-    pub fn take_control_tx(&mut self) -> Option<Sender<OutgoingCallControl>> {
-        self.control_tx.take()
+    pub fn call_id(&self) -> InternalCallId {
+        self.call_id.clone()
     }
 
-    pub fn internal_call_id(&self) -> InternalCallId {
-        self.internal_call_id.clone()
-    }
+    pub async fn start(&mut self) -> Result<(), SipOutgoingCallError> {
+        if self.rtp.sdp().is_none() {
+            self.rtp.create_offer().await?;
+        }
 
-    pub async fn run_loop(&mut self) -> Result<(), OutgoingCallError> {
-        let sdp = create_offer(&self.stream.gateway, &self.stream.token).await?;
+        let sdp = self.rtp.sdp().expect("should have sdp");
         let mut invite = self.initiator.create_invite();
-        invite.body = sdp.sdp.clone();
+        invite.body = sdp.clone();
+        if let Some(auth) = &mut self.auth {
+            auth.session.authorize_request(&mut invite.headers);
+        }
+
         self.initiator.send_invite(invite).await?;
-        let call_id = self.internal_call_id();
-        log::info!(
-            "[OutgoingCall {call_id}] start loop with sdp {}",
-            String::from_utf8_lossy(&sdp.sdp)
-        );
+        let call_id = self.call_id();
+        log::info!("[SipOutgoingCall {call_id}] start loop with sdp {}", String::from_utf8_lossy(&sdp));
+        Ok(())
+    }
 
-        let res = loop {
-            let select = select2::or(self.initiator.receive(), self.control_rx.recv()).await;
+    pub async fn end(&mut self) -> Result<(), SipOutgoingCallError> {
+        match &mut self.state {
+            InternalState::Talking { session } => {
+                session.terminate().await?;
+                Ok(())
+            }
+            InternalState::Destroyed => Ok(()),
+            _ => {
+                let mut cancel = self.initiator.create_cancel();
+                if let Some(auth) = &mut self.auth {
+                    auth.session.authorize_request(&mut cancel.headers);
+                }
+                self.initiator.send_cancel(cancel).await?;
+                Ok(())
+            }
+        }
+    }
 
-            match select {
-                select2::OrOutput::Left(event) => match event? {
-                    ezk_sip_ua::invite::initiator::Response::Provisional(response) => {
-                        let code = response.line.code.into_u16();
-                        log::info!("[OutgoingCall {call_id}] on Provisional {code}");
-                    }
-                    ezk_sip_ua::invite::initiator::Response::Failure(response) => {
-                        if let InternalState::Calling { auth_failed } = &mut self.state {
-                            if response.line.code.into_u16() != 401 {
-                                log::error!("[OutgoingCall {call_id}] error => reject");
-                                break Err(OutgoingCallError::Sip(response.line.code.into_u16()));
-                            } else if *auth_failed {
-                                log::error!(
-                                    "[OutgoingCall {call_id}] already has authen error => reject"
-                                );
-                                break Err(OutgoingCallError::Sip(response.line.code.into_u16()));
-                            } else if response.line.code.into_u16() == 401 {
-                                *auth_failed = true;
-                                //unauth processing
-                                if let Some(auth) = &mut self.auth {
-                                    log::info!("[OutgoingCall {call_id}] resend invite with auth");
+    pub async fn recv(&mut self) -> Result<Option<SipOutgoingCallOut>, SipOutgoingCallError> {
+        let call_id = self.call_id();
+        let out = if let InternalState::Early { early } = &mut self.state {
+            select2::or(self.initiator.receive(), early.receive()).await
+        } else {
+            select2::OrOutput::Left(self.initiator.receive().await)
+        };
+
+        match out {
+            select2::OrOutput::Left(main_event) => match main_event? {
+                Response::Provisional(response) => {
+                    let code = response.line.code.into_u16();
+                    log::info!("[SipOutgoingCall {call_id}] on Provisional {code}");
+                    Ok(Some(SipOutgoingCallOut::Event(OutgoingCallEvent::Provisional { code })))
+                }
+                Response::Failure(response) => {
+                    if let InternalState::Calling { auth_failed } = &mut self.state {
+                        if response.line.code.into_u16() != 401 {
+                            log::error!("[SipOutgoingCall {call_id}] error => reject");
+                            Err(SipOutgoingCallError::Sip(response.line.code.into_u16()))
+                        } else if response.line.code.into_u16() == 401 {
+                            //unauth processing
+                            if let Some(auth) = &mut self.auth {
+                                if *auth_failed {
+                                    Err(SipOutgoingCallError::Sip(response.line.code.into_u16()))
+                                } else {
+                                    *auth_failed = true;
+                                    log::info!("[SipOutgoingCall {call_id}] resend invite with auth");
                                     let tsx = self.initiator.transaction().unwrap();
                                     let inv = tsx.request();
 
@@ -163,61 +175,60 @@ impl OutgoingCall {
                                         },
                                     )?;
 
-                                    let mut invite = self.initiator.create_invite();
-                                    auth.session.authorize_request(&mut invite.headers);
-                                    self.initiator.send_invite(invite).await?;
-                                } else {
-                                    log::error!("[OutgoingCall {call_id}] call auth required");
-                                    break Err(OutgoingCallError::Sip(
-                                        response.line.code.into_u16(),
-                                    ));
+                                    self.start().await?;
+                                    Ok(Some(SipOutgoingCallOut::Continue))
                                 }
                             } else {
-                                log::error!(
-                                    "[OutgoingCall {call_id}] call failed {}",
-                                    response.line.code.into_u16()
-                                );
-                                break Err(OutgoingCallError::Sip(response.line.code.into_u16()));
+                                log::error!("[SipOutgoingCall {call_id}] call auth required");
+                                Err(SipOutgoingCallError::Sip(response.line.code.into_u16()))
                             }
                         } else {
-                            log::error!(
-                                "[OutgoingCall {call_id}] call failed {}",
-                                response.line.code.into_u16()
-                            );
-                            break Err(OutgoingCallError::Sip(response.line.code.into_u16()));
+                            log::error!("[SipOutgoingCall {call_id}] call failed {}", response.line.code.into_u16());
+                            Err(SipOutgoingCallError::Sip(response.line.code.into_u16()))
                         }
-                    }
-                    ezk_sip_ua::invite::initiator::Response::Early(early, tsx, req) => {
-                        log::info!("[OutgoingCall {call_id}] on early");
-                        self.state = InternalState::Early { early };
-                    }
-                    ezk_sip_ua::invite::initiator::Response::Session(session, _response) => {
-                        log::info!("[OutgoingCall {call_id}] call establisted");
-                        self.state = InternalState::Talking { session };
-                    }
-                    ezk_sip_ua::invite::initiator::Response::Finished => {
-                        log::info!("[OutgoingCall {call_id}] call finished");
-                        self.state = InternalState::Destroyed;
-                        break Ok(());
-                    }
-                },
-                select2::OrOutput::Right(event) => {
-                    match event.ok_or(OutgoingCallError::InternalChannel)? {
-                        OutgoingCallControl::End => match &mut self.state {
-                            InternalState::Calling { auth_failed } => {}
-                            InternalState::Early { early } => {}
-                            InternalState::Talking { session } => {
-                                log::info!("[OutgoingCall {call_id}] end call");
-                                session.terminate().await;
-                                break Ok(());
-                            }
-                            InternalState::Destroyed => {}
-                        },
+                    } else {
+                        log::error!("[SipOutgoingCall {call_id}] call failed {}", response.line.code.into_u16());
+                        Err(SipOutgoingCallError::Sip(response.line.code.into_u16()))
                     }
                 }
-            }
-        };
-        log::info!("[OutgoingCall {call_id}] end loop {res:?}");
-        res
+                Response::Early(early, response, _req) => {
+                    let code = response.line.code.into_u16();
+                    log::info!("[SipOutgoingCall {call_id}] on early code: {code}");
+                    self.state = InternalState::Early { early };
+                    Ok(Some(SipOutgoingCallOut::Event(OutgoingCallEvent::Early { code })))
+                }
+                Response::Session(session, response) => {
+                    let code = response.line.code.into_u16();
+                    log::info!("[SipOutgoingCall {call_id}] call establisted code: {code}");
+                    if response.body.len() > 0 {
+                        self.rtp.set_answer(response.body.clone()).await?;
+                    }
+
+                    self.state = InternalState::Talking { session };
+                    Ok(Some(SipOutgoingCallOut::Event(OutgoingCallEvent::Accepted { code })))
+                }
+                Response::Finished => {
+                    log::info!("[SipOutgoingCall {call_id}] call finished");
+                    self.state = InternalState::Destroyed;
+                    Ok(None)
+                }
+            },
+            select2::OrOutput::Right(early_event) => match early_event? {
+                EarlyResponse::Provisional(response, _rseq) => {
+                    let code = response.line.code.into_u16();
+                    log::info!("[SipOutgoingCall {call_id}] early Provisional {code}");
+                    Ok(Some(SipOutgoingCallOut::Continue))
+                }
+                EarlyResponse::Success(_session, response) => {
+                    let code = response.line.code.into_u16();
+                    log::info!("[SipOutgoingCall {call_id}] early Success {code}");
+                    Ok(Some(SipOutgoingCallOut::Continue))
+                }
+                EarlyResponse::Terminated => {
+                    log::info!("[SipOutgoingCall {call_id}] early Terminated");
+                    Ok(Some(SipOutgoingCallOut::Continue))
+                }
+            },
+        }
     }
 }

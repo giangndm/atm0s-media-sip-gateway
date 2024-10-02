@@ -7,7 +7,6 @@ use ezk_sip_types::{
 };
 use ezk_sip_ua::{dialog::DialogLayer, invite::InviteLayer};
 use incoming::InviteAcceptLayer;
-use outgoing::{OutgoingCall, OutgoingCallError};
 use thiserror::Error;
 
 use crate::{
@@ -18,7 +17,7 @@ use crate::{
 mod incoming;
 mod outgoing;
 
-pub use outgoing::OutgoingCallControl;
+pub use outgoing::{SipOutgoingCall, SipOutgoingCallError, SipOutgoingCallOut};
 
 #[derive(Debug, Error)]
 pub enum SipServerError {
@@ -39,44 +38,19 @@ impl SipServer {
         let dialog_layer = builder.add_layer(DialogLayer::default());
         let invite_layer = builder.add_layer(InviteLayer::default());
 
-        let contact: SipUri = format!("sip:atm0s@{}:55060", addr.ip())
-            .parse()
-            .expect("Should parse");
+        let contact: SipUri = format!("sip:atm0s@{}:55060", addr.ip()).parse().expect("Should parse");
         let contact = Contact::new(NameAddr::uri(contact));
-        builder.add_layer(InviteAcceptLayer::new(
-            contact,
-            dialog_layer,
-            invite_layer,
-            address_book,
-        ));
+        builder.add_layer(InviteAcceptLayer::new(contact, dialog_layer, invite_layer, address_book));
 
         Udp::spawn(&mut builder, addr).await?;
 
         // Build endpoint to start the SIP Stack
         let endpoint = builder.build();
 
-        Ok(Self {
-            endpoint,
-            dialog_layer,
-            invite_layer,
-        })
+        Ok(Self { endpoint, dialog_layer, invite_layer })
     }
 
-    pub fn make_call(
-        &self,
-        from: &str,
-        to: &str,
-        auth: Option<SipAuth>,
-        stream: StreamingInfo,
-    ) -> Result<OutgoingCall, OutgoingCallError> {
-        OutgoingCall::new(
-            self.endpoint.clone(),
-            self.dialog_layer,
-            self.invite_layer,
-            from,
-            to,
-            auth,
-            stream,
-        )
+    pub fn make_call(&self, from: &str, to: &str, auth: Option<SipAuth>, stream: StreamingInfo) -> Result<SipOutgoingCall, SipOutgoingCallError> {
+        SipOutgoingCall::new(self.endpoint.clone(), self.dialog_layer, self.invite_layer, from, to, auth, stream)
     }
 }

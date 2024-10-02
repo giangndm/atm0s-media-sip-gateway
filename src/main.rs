@@ -35,19 +35,11 @@ struct Args {
 async fn main() -> Result<(), GatewayError> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
-    log::info!(
-        "Starting server with http port {} and sip port {}",
-        args.http,
-        args.sip
-    );
+    log::info!("Starting server with http port {} and sip port {}", args.http, args.sip);
 
     let address_book = AddressBookStorage::default();
     if let Some(sync_url) = args.phone_numbers_sync {
-        let mut address_book_sync = AddressBookSync::new(
-            &sync_url,
-            Duration::from_millis(args.phone_numbers_sync_interval_ms),
-            address_book.clone(),
-        );
+        let mut address_book_sync = AddressBookSync::new(&sync_url, Duration::from_millis(args.phone_numbers_sync_interval_ms), address_book.clone());
 
         tokio::spawn(async move {
             address_book_sync.run_loop().await;
@@ -55,5 +47,9 @@ async fn main() -> Result<(), GatewayError> {
     }
 
     let mut gateway = Gateway::new(args.http, &args.secure, args.sip, address_book).await?;
-    gateway.run_loop().await
+    loop {
+        if let Err(e) = gateway.recv().await {
+            log::error!("gateway error {e:?}");
+        }
+    }
 }

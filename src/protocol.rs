@@ -1,7 +1,7 @@
 use derive_more::derive::{Deref, Display, From, Into};
 use ipnet::IpNet;
 use poem_openapi::{Enum, Object};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Note that his call_id is from internal state and not a SipCallID
@@ -71,4 +71,14 @@ pub enum CallApiError {
     WrongSecret,
     #[error("CallNotFound")]
     CallNotFound,
+    #[error("SipError {0}")]
+    SipError(String),
+}
+
+#[derive(Debug, Serialize)]
+pub enum OutgoingCallEvent {
+    Provisional { code: u16 },
+    Early { code: u16 },
+    Accepted { code: u16 },
+    Failure { code: u16 },
 }

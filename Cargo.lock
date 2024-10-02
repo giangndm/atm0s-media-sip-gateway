@@ -183,9 +183,9 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bitfield"
-version = "0.14.0"
+version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d7e60934ceec538daadb9d8432424ed043a904d8e0243f3c6446bce549a46ac"
+checksum = "c821a6e124197eb56d907ccc2188eab1038fb919c914f47976e64dd8dbc855d1"
 
 [[package]]
 name = "bitflags"
@@ -509,18 +509,15 @@ dependencies = [
 [[package]]
 name = "ezk-internal"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8a44bf5d896dc281c222e438fbfd927cacda6e95042bc6c7a338943e74185465"
+source = "git+https://github.com/giangndm/ezk.git?branch=feat-cancel-call#ad4f4a96b2fb5a48e9212ab7482fd4770347d0c9"
 dependencies = [
- "anyhow",
  "nom",
 ]
 
 [[package]]
 name = "ezk-sdp-types"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3bbdacd6750c2462158d49a5e8b116a00bfa2d81a3298a608b4979d90ddb9e2"
+source = "git+https://github.com/giangndm/ezk.git?branch=feat-cancel-call#ad4f4a96b2fb5a48e9212ab7482fd4770347d0c9"
 dependencies = [
  "bytes",
  "bytesstr",
@@ -532,8 +529,7 @@ dependencies = [
 [[package]]
 name = "ezk-sip-auth"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3304d9f022c9981495ad4b1c09e2bd8e3f6641b6c123bad134684f34cca644c5"
+source = "git+https://github.com/giangndm/ezk.git?branch=feat-cancel-call#ad4f4a96b2fb5a48e9212ab7482fd4770347d0c9"
 dependencies = [
  "bytesstr",
  "ezk-sip-types",
@@ -547,8 +543,7 @@ dependencies = [
 [[package]]
 name = "ezk-sip-core"
 version = "0.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "64c06e431f2f5a504969eab2404ed2fcea2317bd13fd08b690286b0b0ba8fc8d"
+source = "git+https://github.com/giangndm/ezk.git?branch=feat-cancel-call#ad4f4a96b2fb5a48e9212ab7482fd4770347d0c9"
 dependencies = [
  "async-trait",
  "bytes",
@@ -574,8 +569,7 @@ dependencies = [
 [[package]]
 name = "ezk-sip-types"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0dcb00d5042ab9494cd9a54c8a3aa673418f32b1f750b18207c49068d5d8513e"
+source = "git+https://github.com/giangndm/ezk.git?branch=feat-cancel-call#ad4f4a96b2fb5a48e9212ab7482fd4770347d0c9"
 dependencies = [
  "anyhow",
  "bytes",
@@ -592,8 +586,7 @@ dependencies = [
 [[package]]
 name = "ezk-sip-ua"
 version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5b1511e04217405dedf8c8bb0d4a6cb9901510701c31b6ad228d03162e00abfb"
+source = "git+https://github.com/giangndm/ezk.git?branch=feat-cancel-call#ad4f4a96b2fb5a48e9212ab7482fd4770347d0c9"
 dependencies = [
  "async-trait",
  "bytes",
@@ -612,8 +605,7 @@ dependencies = [
 [[package]]
 name = "ezk-stun"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8af58337c19f684c10c08c048b8acf7e72e66caa090e68efbf09638dfaa5031d"
+source = "git+https://github.com/giangndm/ezk.git?branch=feat-cancel-call#ad4f4a96b2fb5a48e9212ab7482fd4770347d0c9"
 dependencies = [
  "async-trait",
  "bytes",
@@ -627,8 +619,7 @@ dependencies = [
 [[package]]
 name = "ezk-stun-types"
 version = "0.1.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6215a74319366892c432ecdae9b207cb2b7fe6d1c4a04a89234fbdad00ab3c60"
+source = "git+https://github.com/giangndm/ezk.git?branch=feat-cancel-call#ad4f4a96b2fb5a48e9212ab7482fd4770347d0c9"
 dependencies = [
  "bitfield",
  "byteorder",
@@ -1736,6 +1727,7 @@ dependencies = [
  "ezk-sip-core",
  "ezk-sip-types",
  "ezk-sip-ua",
+ "futures-util",
  "ipnet",
  "log",
  "pin-project-lite",
@@ -1744,6 +1736,7 @@ dependencies = [
  "rand",
  "reqwest",
  "serde",
+ "serde_json",
  "spin",
  "thiserror",
  "tokio",
