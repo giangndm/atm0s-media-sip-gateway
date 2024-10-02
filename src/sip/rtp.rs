@@ -21,6 +21,7 @@ pub struct RtpEngineOffer {
     gateway: String,
     token: String,
     offer: Option<(String, Bytes)>,
+    answered: bool,
 }
 
 impl RtpEngineOffer {
@@ -29,11 +30,16 @@ impl RtpEngineOffer {
             gateway: gateway.to_string(),
             token: token.to_string(),
             offer: None,
+            answered: false,
         }
     }
 
     pub fn sdp(&self) -> Option<Bytes> {
         self.offer.as_ref().map(|(_, sdp)| sdp.clone())
+    }
+
+    pub fn answered(&self) -> bool {
+        self.answered
     }
 
     pub async fn create_offer(&mut self) -> Result<Bytes, RtpEngineError> {
@@ -81,6 +87,7 @@ impl RtpEngineOffer {
         let status = res.status().as_u16();
         if status == 200 {
             log::info!("[RtpEngineOffer] sent answer {url}");
+            self.answered = true;
             Ok(())
         } else {
             log::error!("[RtpEngineOffer] send answer error {url} {status}");

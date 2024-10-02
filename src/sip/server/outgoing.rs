@@ -220,7 +220,7 @@ impl SipOutgoingCall {
                         response.base_headers.call_id,
                         String::from_utf8_lossy(&response.body)
                     );
-                    if response.body.len() > 0 {
+                    if !self.rtp.answered() && !response.body.is_empty() {
                         self.rtp.set_answer(response.body.clone()).await?;
                     }
 
@@ -237,6 +237,10 @@ impl SipOutgoingCall {
                 EarlyResponse::Provisional(response, _rseq) => {
                     let code = response.line.code.into_u16();
                     log::info!("[SipOutgoingCall {call_id}] early Provisional {code}");
+                    if !self.rtp.answered() && !response.body.is_empty() {
+                        self.rtp.set_answer(response.body.clone()).await?;
+                    }
+
                     Ok(Some(SipOutgoingCallOut::Continue))
                 }
                 EarlyResponse::Success(session, response) => {
@@ -252,7 +256,7 @@ impl SipOutgoingCall {
                         response.base_headers.call_id,
                         String::from_utf8_lossy(&response.body)
                     );
-                    if response.body.len() > 0 {
+                    if !self.rtp.answered() && !response.body.is_empty() {
                         self.rtp.set_answer(response.body.clone()).await?;
                     }
 
