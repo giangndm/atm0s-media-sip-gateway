@@ -23,15 +23,21 @@ impl<EM: EventEmitter> OutgoingCall<EM> {
     }
 
     pub fn add_emitter(&mut self, emitter: EM) {
-        self.control_tx.send(CallControl::Sub(emitter));
+        if let Err(e) = self.control_tx.send(CallControl::Sub(emitter)) {
+            log::error!("[OutgoingCall] send Sub control error {e:?}");
+        }
     }
 
     pub fn del_emitter(&mut self, emitter: EmitterId) {
-        self.control_tx.send(CallControl::Unsub(emitter));
+        if let Err(e) = self.control_tx.send(CallControl::Unsub(emitter)) {
+            log::error!("[OutgoingCall] send Unsub control error {e:?}");
+        }
     }
 
     pub fn end(&mut self) {
-        self.control_tx.send(CallControl::End);
+        if let Err(e) = self.control_tx.send(CallControl::End) {
+            log::error!("[OutgoingCall] send End control error {e:?}");
+        }
     }
 }
 
@@ -90,14 +96,18 @@ async fn run_call_loop<EM: EventEmitter>(mut call: SipOutgoingCall, mut control_
                     if emitters.remove(&emitter_id).is_some() {
                         if emitters.is_empty() {
                             log::info!("[OutgoingCall] all sub disconnected => end call");
-                            call.end().await;
+                            if let Err(e) = call.end().await {
+                                log::error!("[OutgoingCall] end call error {e:?}");
+                            }
                             break;
                         }
                     }
                 }
                 CallControl::End => {
                     log::info!("[OutgoingCall] received end request");
-                    call.end().await;
+                    if let Err(e) = call.end().await {
+                        log::error!("[OutgoingCall] end call error {e:?}");
+                    }
                     break;
                 }
             },

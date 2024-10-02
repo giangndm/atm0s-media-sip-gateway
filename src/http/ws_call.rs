@@ -1,5 +1,5 @@
 use crate::{
-    call_manager::{EmitterId, EventEmitter, EventEmitterError},
+    call_manager::{EmitterId, EventEmitter},
     futures::select2::{self, OrOutput},
     protocol::InternalCallId,
 };
@@ -59,8 +59,12 @@ pub fn ws_single_call(Path(call_id): Path<String>, ws: WebSocket, data: Data<&Se
                         break;
                     }
                 }
-                OrOutput::Left(None) => {}
-                OrOutput::Right(Some(Ok(_))) => {}
+                OrOutput::Left(_) => {
+                    break;
+                }
+                OrOutput::Right(Some(Ok(_))) => {
+                    log::info!("[WsCall {emitter_id}] received data");
+                }
                 OrOutput::Right(_) => {
                     log::info!("[WsCall {emitter_id}] socket closed");
                     break;
@@ -100,8 +104,10 @@ impl EventEmitter for WebsocketEventEmitter {
         self.emitter_id
     }
 
-    fn fire<E: Serialize>(&mut self, event: &E) -> Result<(), EventEmitterError> {
+    fn fire<E: Serialize>(&mut self, event: &E) {
         let json_str = serde_json::to_string(event).expect("should convert to json");
-        self.out_tx.send(json_str).map_err(|_e| EventEmitterError::InternalChannel)
+        if let Err(e) = self.out_tx.send(json_str) {
+            log::error!("[WebsocketEventEmitter] send event error {e:?}");
+        }
     }
 }

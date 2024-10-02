@@ -34,7 +34,7 @@ pub enum EventEmitterError {
 
 pub trait EventEmitter: Send + Sync + 'static {
     fn emitter_id(&self) -> EmitterId;
-    fn fire<E: Serialize>(&mut self, event: &E) -> Result<(), EventEmitterError>;
+    fn fire<E: Serialize>(&mut self, event: &E);
 }
 
 pub struct CallManager<EM> {
