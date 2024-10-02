@@ -20,7 +20,7 @@ use ezk_sip_ua::{
 use thiserror::Error;
 
 use crate::{
-    futures::select2,
+    futures::{select2, select3},
     protocol::{InternalCallId, OutgoingCallEvent, SipAuth, StreamingInfo},
     sip::{RtpEngineError, RtpEngineOffer},
 };
@@ -144,12 +144,16 @@ impl SipOutgoingCall {
     pub async fn recv(&mut self) -> Result<Option<SipOutgoingCallOut>, SipOutgoingCallError> {
         let call_id = self.call_id();
         let out = match &mut self.state {
-            InternalState::Early { early } => select2::or(self.initiator.receive(), early.receive()).await,
-            _ => select2::OrOutput::Left(self.initiator.receive().await),
+            InternalState::Talking { session, early } => match select2::or(self.initiator.receive(), session.drive()).await {
+                select2::OrOutput::Left(out) => select3::OrOutput::Left(out),
+                select2::OrOutput::Right(out) => select3::OrOutput::Right(out),
+            },
+            InternalState::Early { early } => select2::or(self.initiator.receive(), early.receive()).await.into(),
+            _ => select3::OrOutput::Left(self.initiator.receive().await),
         };
 
         match out {
-            select2::OrOutput::Left(main_event) => match main_event? {
+            select3::OrOutput::Left(main_event) => match main_event? {
                 Response::Provisional(response) => {
                     let code = response.line.code.into_u16();
                     log::info!("[SipOutgoingCall {call_id}] on Provisional {code}");
@@ -211,7 +215,11 @@ impl SipOutgoingCall {
                     }
 
                     let code = response.line.code.into_u16();
-                    log::info!("[SipOutgoingCall {call_id}] call established {code} body: {}", String::from_utf8_lossy(&response.body));
+                    log::info!(
+                        "[SipOutgoingCall {call_id}] call success sip_call: {:?} code: {code} body: {}",
+                        response.base_headers.call_id,
+                        String::from_utf8_lossy(&response.body)
+                    );
                     if response.body.len() > 0 {
                         self.rtp.set_answer(response.body.clone()).await?;
                     }
@@ -225,7 +233,7 @@ impl SipOutgoingCall {
                     Ok(None)
                 }
             },
-            select2::OrOutput::Right(early_event) => match early_event? {
+            select3::OrOutput::Middle(early_event) => match early_event? {
                 EarlyResponse::Provisional(response, _rseq) => {
                     let code = response.line.code.into_u16();
                     log::info!("[SipOutgoingCall {call_id}] early Provisional {code}");
@@ -236,10 +244,14 @@ impl SipOutgoingCall {
                         let cseq_num = response.base_headers.cseq.cseq;
                         let mut ack_out = create_ack(&session.dialog, cseq_num).await.unwrap();
                         session.endpoint.send_outgoing_request(&mut ack_out).await.unwrap();
-                    }
+                    };
 
                     let code = response.line.code.into_u16();
-                    log::info!("[SipOutgoingCall {call_id}] early success {code} body: {}", String::from_utf8_lossy(&response.body));
+                    log::info!(
+                        "[SipOutgoingCall {call_id}] early success sip_call: {:?} code: {code} body: {}",
+                        response.base_headers.call_id,
+                        String::from_utf8_lossy(&response.body)
+                    );
                     if response.body.len() > 0 {
                         self.rtp.set_answer(response.body.clone()).await?;
                     }
@@ -255,6 +267,20 @@ impl SipOutgoingCall {
                 EarlyResponse::Terminated => {
                     log::info!("[SipOutgoingCall {call_id}] early Terminated");
                     Ok(Some(SipOutgoingCallOut::Continue))
+                }
+            },
+            select3::OrOutput::Right(session_event) => match session_event? {
+                ezk_sip_ua::invite::session::Event::RefreshNeeded(refresh_needed) => todo!(),
+                ezk_sip_ua::invite::session::Event::ReInviteReceived(re_invite_received) => todo!(),
+                ezk_sip_ua::invite::session::Event::Bye(bye_event) => {
+                    log::info!("[SipOutgoingCall {call_id}] session bye");
+                    self.state = InternalState::Destroyed;
+                    Ok(None)
+                }
+                ezk_sip_ua::invite::session::Event::Terminated => {
+                    log::info!("[SipOutgoingCall {call_id}] session terminated");
+                    self.state = InternalState::Destroyed;
+                    Ok(None)
                 }
             },
         }
