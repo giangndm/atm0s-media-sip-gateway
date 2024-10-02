@@ -29,6 +29,10 @@ struct Args {
     /// Address PhoneBook sync interval
     #[arg(long, env, default_value_t = 30_000)]
     phone_numbers_sync_interval_ms: u64,
+
+    /// Http hook queues
+    #[arg(long, env, default_value_t = 20)]
+    http_hook_queues: usize,
 }
 
 #[tokio::main]
@@ -46,7 +50,7 @@ async fn main() -> Result<(), GatewayError> {
         });
     }
 
-    let mut gateway = Gateway::new(args.http, &args.secure, args.sip, address_book).await?;
+    let mut gateway = Gateway::new(args.http, &args.secure, args.sip, address_book, args.http_hook_queues).await?;
     loop {
         if let Err(e) = gateway.recv().await {
             log::error!("gateway error {e:?}");

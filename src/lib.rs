@@ -1,8 +1,9 @@
-use std::{io, net::SocketAddr};
+use std::{collections::HashMap, io, net::SocketAddr};
 
 use address_book::AddressBookStorage;
 use call_manager::CallManager;
 use futures::select2;
+use hook::HttpHook;
 use http::{HttpCommand, HttpServer, WebsocketEventEmitter};
 use thiserror::Error;
 use tokio::sync::mpsc::Receiver;
@@ -27,16 +28,18 @@ pub enum GatewayError {
 
 pub struct Gateway {
     http_rx: Receiver<HttpCommand>,
+    http_hook: HttpHook,
     call_manager: CallManager<WebsocketEventEmitter>,
 }
 
 impl Gateway {
-    pub async fn new(http: SocketAddr, secret: &str, sip: SocketAddr, address_book: AddressBookStorage) -> Result<Self, GatewayError> {
+    pub async fn new(http: SocketAddr, secret: &str, sip: SocketAddr, address_book: AddressBookStorage, http_hook_queues: usize) -> Result<Self, GatewayError> {
         let (mut http, http_rx) = HttpServer::new(http, secret);
         tokio::spawn(async move { http.run_loop().await });
 
         Ok(Self {
             http_rx,
+            http_hook: HttpHook::new(http_hook_queues),
             call_manager: CallManager::new(sip, address_book).await,
         })
     }
@@ -46,7 +49,8 @@ impl Gateway {
         match out {
             select2::OrOutput::Left(cmd) => match cmd.expect("internal channel error") {
                 HttpCommand::CreateCall(req, sender) => {
-                    let res = self.call_manager.create_call(req);
+                    let hook_sender = self.http_hook.new_sender(&req.hook, HashMap::new());
+                    let res = self.call_manager.create_call(req, hook_sender);
                     if let Err(e) = sender.send(res) {
                         log::warn!("[Gateway] sending create_call response error {e:?}");
                     }

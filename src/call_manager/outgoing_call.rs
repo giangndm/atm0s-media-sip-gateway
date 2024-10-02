@@ -4,6 +4,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::{
     futures::select2,
+    hook::HttpHookSender,
     protocol::{InternalCallId, OutgoingCallEvent},
     sip::{SipOutgoingCall, SipOutgoingCallError, SipOutgoingCallOut},
 };
@@ -15,9 +16,9 @@ pub struct OutgoingCall<EM> {
 }
 
 impl<EM: EventEmitter> OutgoingCall<EM> {
-    pub fn new(sip: SipOutgoingCall, destroy_tx: UnboundedSender<InternalCallId>) -> Self {
+    pub fn new(sip: SipOutgoingCall, destroy_tx: UnboundedSender<InternalCallId>, hook: HttpHookSender) -> Self {
         let (control_tx, control_rx) = unbounded_channel();
-        tokio::spawn(async move { run_call_loop(sip, control_rx, destroy_tx).await });
+        tokio::spawn(async move { run_call_loop(sip, control_rx, destroy_tx, hook).await });
 
         Self { control_tx }
     }
@@ -47,7 +48,7 @@ enum CallControl<EM> {
     End,
 }
 
-async fn run_call_loop<EM: EventEmitter>(mut call: SipOutgoingCall, mut control_rx: UnboundedReceiver<CallControl<EM>>, destroy_tx: UnboundedSender<InternalCallId>) {
+async fn run_call_loop<EM: EventEmitter>(mut call: SipOutgoingCall, mut control_rx: UnboundedReceiver<CallControl<EM>>, destroy_tx: UnboundedSender<InternalCallId>, hook: HttpHookSender) {
     let call_id = call.call_id();
     let mut emitters: HashMap<EmitterId, EM> = HashMap::new();
 
@@ -69,6 +70,7 @@ async fn run_call_loop<EM: EventEmitter>(mut call: SipOutgoingCall, mut control_
                     for emitter in emitters.values_mut() {
                         emitter.fire(&event);
                     }
+                    hook.send(&event);
                 }
                 SipOutgoingCallOut::Continue => {}
             },
@@ -86,6 +88,7 @@ async fn run_call_loop<EM: EventEmitter>(mut call: SipOutgoingCall, mut control_
                 for emitter in emitters.values_mut() {
                     emitter.fire(&OutgoingCallEvent::Failure { code });
                 }
+                hook.send(&OutgoingCallEvent::Failure { code });
                 break;
             }
             select2::OrOutput::Right(Some(control)) => match control {

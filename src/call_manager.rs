@@ -8,6 +8,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
 use crate::{
     address_book::AddressBookStorage,
+    hook::HttpHookSender,
     protocol::{CallApiError, CreateCallRequest, CreateCallResponse, InternalCallId, UpdateCallRequest, UpdateCallResponse},
     sip::SipServer,
 };
@@ -56,13 +57,13 @@ impl<EM: EventEmitter> CallManager<EM> {
         }
     }
 
-    pub fn create_call(&mut self, req: CreateCallRequest) -> Result<CreateCallResponse, CallApiError> {
+    pub fn create_call(&mut self, req: CreateCallRequest, hook: HttpHookSender) -> Result<CreateCallResponse, CallApiError> {
         let from = format!("sip:{}@{}", req.from_number, req.sip_server);
         let to = format!("sip:{}@{}", req.to_number, req.sip_server);
         match self.sip.make_call(&from, &to, req.sip_auth, req.streaming) {
             Ok(call) => {
                 let call_id = call.call_id();
-                self.out_calls.insert(call_id.clone(), OutgoingCall::new(call, self.destroy_tx.clone()));
+                self.out_calls.insert(call_id.clone(), OutgoingCall::new(call, self.destroy_tx.clone(), hook));
                 Ok(CreateCallResponse {
                     ws: format!("/ws/call/{call_id}?token=fake-token-here"),
                     call_id: call_id.clone().into(),

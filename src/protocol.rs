@@ -76,10 +76,11 @@ pub enum CallApiError {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(tag = "type")]
 pub enum OutgoingCallEvent {
     Provisional { code: u16 },
     Early { code: u16 },
     Accepted { code: u16 },
-    Bye {},
     Failure { code: u16 },
+    Bye {},
 }
