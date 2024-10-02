@@ -1,9 +1,14 @@
+use bytesstr::BytesStr;
 use ezk_sip_auth::{
     digest::{DigestAuthenticator, DigestCredentials},
     CredentialStore, UacAuthSession,
 };
 use ezk_sip_core::{Endpoint, LayerKey};
-use ezk_sip_types::{header::typed::Contact, uri::NameAddr};
+use ezk_sip_types::{
+    header::typed::{Contact, ContentType},
+    uri::NameAddr,
+    Headers,
+};
 use ezk_sip_ua::{
     dialog::DialogLayer,
     invite::{
@@ -28,7 +33,7 @@ struct OutgoingAuth {
 enum InternalState {
     Calling { auth_failed: bool },
     Early { early: Early },
-    Talking { session: Session },
+    Talking { session: Session, early: Option<Early> },
     Destroyed,
 }
 
@@ -66,6 +71,7 @@ impl SipOutgoingCall {
         invite_layer: LayerKey<InviteLayer>,
         from: &str,
         to: &str,
+        contact: Contact,
         auth: Option<SipAuth>,
         stream: StreamingInfo,
     ) -> Result<Self, SipOutgoingCallError> {
@@ -74,7 +80,7 @@ impl SipOutgoingCall {
         let local_uri = endpoint.parse_uri(from).unwrap();
         let target = endpoint.parse_uri(to).unwrap();
 
-        let initiator = Initiator::new(endpoint, dialog_layer, invite_layer, NameAddr::uri(local_uri.clone()), Contact::new(NameAddr::uri(local_uri)), target);
+        let initiator = Initiator::new(endpoint, dialog_layer, invite_layer, NameAddr::uri(local_uri.clone()), contact, target);
 
         let auth = auth.map(|auth| {
             let mut credentials = CredentialStore::new();
@@ -106,6 +112,7 @@ impl SipOutgoingCall {
         let sdp = self.rtp.sdp().expect("should have sdp");
         let mut invite = self.initiator.create_invite();
         invite.body = sdp.clone();
+        invite.headers.insert_named(&ContentType(BytesStr::from_static("application/sdp")));
         if let Some(auth) = &mut self.auth {
             auth.session.authorize_request(&mut invite.headers);
         }
@@ -118,7 +125,7 @@ impl SipOutgoingCall {
 
     pub async fn end(&mut self) -> Result<(), SipOutgoingCallError> {
         match &mut self.state {
-            InternalState::Talking { session } => {
+            InternalState::Talking { session, early } => {
                 session.terminate().await?;
                 Ok(())
             }
@@ -136,10 +143,9 @@ impl SipOutgoingCall {
 
     pub async fn recv(&mut self) -> Result<Option<SipOutgoingCallOut>, SipOutgoingCallError> {
         let call_id = self.call_id();
-        let out = if let InternalState::Early { early } = &mut self.state {
-            select2::or(self.initiator.receive(), early.receive()).await
-        } else {
-            select2::OrOutput::Left(self.initiator.receive().await)
+        let out = match &mut self.state {
+            InternalState::Early { early } => select2::or(self.initiator.receive(), early.receive()).await,
+            _ => select2::OrOutput::Left(self.initiator.receive().await),
         };
 
         match out {
@@ -199,12 +205,12 @@ impl SipOutgoingCall {
                 }
                 Response::Session(session, response) => {
                     let code = response.line.code.into_u16();
-                    log::info!("[SipOutgoingCall {call_id}] call establisted code: {code}");
+                    log::info!("[SipOutgoingCall {call_id}] call established {code} body: {}", String::from_utf8_lossy(&response.body));
                     if response.body.len() > 0 {
                         self.rtp.set_answer(response.body.clone()).await?;
                     }
 
-                    self.state = InternalState::Talking { session };
+                    self.state = InternalState::Talking { session, early: None };
                     Ok(Some(SipOutgoingCallOut::Event(OutgoingCallEvent::Accepted { code })))
                 }
                 Response::Finished => {
@@ -219,10 +225,20 @@ impl SipOutgoingCall {
                     log::info!("[SipOutgoingCall {call_id}] early Provisional {code}");
                     Ok(Some(SipOutgoingCallOut::Continue))
                 }
-                EarlyResponse::Success(_session, response) => {
+                EarlyResponse::Success(session, response) => {
                     let code = response.line.code.into_u16();
-                    log::info!("[SipOutgoingCall {call_id}] early Success {code}");
-                    Ok(Some(SipOutgoingCallOut::Continue))
+                    log::info!("[SipOutgoingCall {call_id}] early success {code} body: {}", String::from_utf8_lossy(&response.body));
+                    if response.body.len() > 0 {
+                        self.rtp.set_answer(response.body.clone()).await?;
+                    }
+
+                    if let InternalState::Early { early } = std::mem::replace(&mut self.state, InternalState::Destroyed) {
+                        self.state = InternalState::Talking { session, early: Some(early) };
+                    } else {
+                        panic!("should in early state");
+                    }
+
+                    Ok(Some(SipOutgoingCallOut::Event(OutgoingCallEvent::Accepted { code })))
                 }
                 EarlyResponse::Terminated => {
                     log::info!("[SipOutgoingCall {call_id}] early Terminated");

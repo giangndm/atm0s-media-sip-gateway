@@ -1720,6 +1720,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "bytesstr",
  "clap",
  "derive_more",
  "ezk-sdp-types",

@@ -72,7 +72,8 @@ impl RtpEngineOffer {
             .timeout(Duration::from_secs(3))
             .build()
             .expect("Should create client")
-            .put(&url)
+            .patch(&url)
+            .header("Content-Type", "application/sdp")
             .body(sdp)
             .send()
             .await?;

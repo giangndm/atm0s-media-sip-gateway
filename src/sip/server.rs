@@ -27,6 +27,7 @@ pub enum SipServerError {
 
 pub struct SipServer {
     endpoint: Endpoint,
+    contact: Contact,
     dialog_layer: LayerKey<DialogLayer>,
     invite_layer: LayerKey<InviteLayer>,
 }
@@ -38,19 +39,24 @@ impl SipServer {
         let dialog_layer = builder.add_layer(DialogLayer::default());
         let invite_layer = builder.add_layer(InviteLayer::default());
 
-        let contact: SipUri = format!("sip:atm0s@{}:55060", addr.ip()).parse().expect("Should parse");
+        let contact: SipUri = format!("sip:atm0s@{}", addr).parse().expect("Should parse");
         let contact = Contact::new(NameAddr::uri(contact));
-        builder.add_layer(InviteAcceptLayer::new(contact, dialog_layer, invite_layer, address_book));
+        builder.add_layer(InviteAcceptLayer::new(contact.clone(), dialog_layer, invite_layer, address_book));
 
         Udp::spawn(&mut builder, addr).await?;
 
         // Build endpoint to start the SIP Stack
         let endpoint = builder.build();
 
-        Ok(Self { endpoint, dialog_layer, invite_layer })
+        Ok(Self {
+            endpoint,
+            contact,
+            dialog_layer,
+            invite_layer,
+        })
     }
 
     pub fn make_call(&self, from: &str, to: &str, auth: Option<SipAuth>, stream: StreamingInfo) -> Result<SipOutgoingCall, SipOutgoingCallError> {
-        SipOutgoingCall::new(self.endpoint.clone(), self.dialog_layer, self.invite_layer, from, to, auth, stream)
+        SipOutgoingCall::new(self.endpoint.clone(), self.dialog_layer, self.invite_layer, from, to, self.contact.clone(), auth, stream)
     }
 }
