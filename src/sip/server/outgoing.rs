@@ -7,11 +7,11 @@ use ezk_sip_core::{Endpoint, LayerKey};
 use ezk_sip_types::{
     header::typed::{Contact, ContentType},
     uri::NameAddr,
-    Headers,
 };
 use ezk_sip_ua::{
     dialog::DialogLayer,
     invite::{
+        create_ack,
         initiator::{Early, EarlyResponse, Initiator, Response},
         session::Session,
         InviteLayer,
@@ -204,6 +204,12 @@ impl SipOutgoingCall {
                     Ok(Some(SipOutgoingCallOut::Event(OutgoingCallEvent::Early { code })))
                 }
                 Response::Session(session, response) => {
+                    {
+                        let cseq_num = response.base_headers.cseq.cseq;
+                        let mut ack_out = create_ack(&session.dialog, cseq_num).await.unwrap();
+                        session.endpoint.send_outgoing_request(&mut ack_out).await.unwrap();
+                    }
+
                     let code = response.line.code.into_u16();
                     log::info!("[SipOutgoingCall {call_id}] call established {code} body: {}", String::from_utf8_lossy(&response.body));
                     if response.body.len() > 0 {
@@ -226,6 +232,12 @@ impl SipOutgoingCall {
                     Ok(Some(SipOutgoingCallOut::Continue))
                 }
                 EarlyResponse::Success(session, response) => {
+                    {
+                        let cseq_num = response.base_headers.cseq.cseq;
+                        let mut ack_out = create_ack(&session.dialog, cseq_num).await.unwrap();
+                        session.endpoint.send_outgoing_request(&mut ack_out).await.unwrap();
+                    }
+
                     let code = response.line.code.into_u16();
                     log::info!("[SipOutgoingCall {call_id}] early success {code} body: {}", String::from_utf8_lossy(&response.body));
                     if response.body.len() > 0 {
