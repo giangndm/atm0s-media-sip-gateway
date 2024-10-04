@@ -1,10 +1,11 @@
-use std::{collections::HashMap, io, net::SocketAddr};
+use std::{collections::HashMap, io, net::SocketAddr, sync::Arc};
 
 use address_book::AddressBookStorage;
 use call_manager::CallManager;
 use futures::select2;
 use hook::HttpHook;
 use http::{HttpCommand, HttpServer, WebsocketEventEmitter};
+use secure::SecureContext;
 use thiserror::Error;
 use tokio::sync::mpsc::Receiver;
 
@@ -14,6 +15,7 @@ pub mod futures;
 pub mod hook;
 pub mod http;
 pub mod protocol;
+pub mod secure;
 pub mod sip;
 
 #[derive(Error, Debug)]
@@ -33,14 +35,14 @@ pub struct Gateway {
 }
 
 impl Gateway {
-    pub async fn new(http: SocketAddr, secret: &str, sip: SocketAddr, address_book: AddressBookStorage, http_hook_queues: usize) -> Result<Self, GatewayError> {
-        let (mut http, http_rx) = HttpServer::new(http, secret);
+    pub async fn new(http: SocketAddr, sip: SocketAddr, address_book: AddressBookStorage, http_hook_queues: usize, media_gateway: &str, secure_ctx: Arc<SecureContext>) -> Result<Self, GatewayError> {
+        let (mut http, http_rx) = HttpServer::new(http, media_gateway, secure_ctx.clone());
         tokio::spawn(async move { http.run_loop().await });
 
         Ok(Self {
             http_rx,
             http_hook: HttpHook::new(http_hook_queues),
-            call_manager: CallManager::new(sip, address_book).await,
+            call_manager: CallManager::new(sip, address_book, secure_ctx).await,
         })
     }
 
@@ -48,9 +50,9 @@ impl Gateway {
         let out = select2::or(self.http_rx.recv(), self.call_manager.recv()).await;
         match out {
             select2::OrOutput::Left(cmd) => match cmd.expect("internal channel error") {
-                HttpCommand::CreateCall(req, sender) => {
+                HttpCommand::CreateCall(req, media_api, sender) => {
                     let hook_sender = self.http_hook.new_sender(&req.hook, HashMap::new());
-                    let res = self.call_manager.create_call(req, hook_sender);
+                    let res = self.call_manager.create_call(req, media_api, hook_sender);
                     if let Err(e) = sender.send(res) {
                         log::warn!("[Gateway] sending create_call response error {e:?}");
                     }

@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Note that his call_id is from internal state and not a SipCallID
-#[derive(Debug, From, Into, Deref, Clone, Display, Hash, PartialEq, Eq)]
+#[derive(Debug, From, Into, Deref, Clone, Display, Hash, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InternalCallId(String);
 
 impl InternalCallId {
@@ -22,10 +22,9 @@ pub struct SipAuth {
 
 #[derive(Debug, Object)]
 pub struct StreamingInfo {
-    pub gateway: String,
-    pub token: String,
     pub room: String,
     pub peer: String,
+    pub record: bool,
 }
 
 #[derive(Debug, Enum)]
@@ -52,6 +51,7 @@ pub struct CreateCallRequest {
 #[derive(Debug, Object)]
 pub struct CreateCallResponse {
     pub call_id: String,
+    pub call_token: String,
     pub ws: String,
 }
 
@@ -69,6 +69,8 @@ pub enum CallApiError {
     InternalChannel(String),
     #[error("WrongSecret")]
     WrongSecret,
+    #[error("WrongToken")]
+    WrongToken,
     #[error("CallNotFound")]
     CallNotFound,
     #[error("SipError {0}")]
@@ -77,10 +79,24 @@ pub enum CallApiError {
 
 #[derive(Debug, Serialize)]
 #[serde(tag = "type")]
-pub enum OutgoingCallEvent {
+pub enum OutgoingCallSipEvent {
     Provisional { code: u16 },
     Early { code: u16 },
     Accepted { code: u16 },
     Failure { code: u16 },
     Bye {},
+}
+
+#[derive(Debug, Serialize)]
+#[serde(tag = "type", content = "content")]
+pub enum OutgoingCallEvent {
+    Sip(OutgoingCallSipEvent),
+    Error { message: String },
+    Destroyed,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq, Eq, Clone, Copy)]
+pub enum CallDirection {
+    Outgoing,
+    Incoming,
 }

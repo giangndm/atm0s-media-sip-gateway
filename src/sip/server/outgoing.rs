@@ -17,7 +17,7 @@ use thiserror::Error;
 
 use crate::{
     protocol::{InternalCallId, OutgoingCallEvent, SipAuth, StreamingInfo},
-    sip::{RtpEngineError, RtpEngineOffer},
+    sip::{MediaApi, MediaEngineError, MediaRtpEngineOffer},
 };
 
 mod calling_state;
@@ -84,7 +84,7 @@ pub enum SipOutgoingCallError {
     #[error("InternalChannel")]
     InternalChannel,
     #[error("RtpEngine{0}")]
-    RtpEngine(#[from] RtpEngineError),
+    RtpEngine(#[from] MediaEngineError),
 }
 
 pub enum SipOutgoingCallOut {
@@ -96,7 +96,7 @@ struct Ctx {
     call_id: InternalCallId,
     initiator: Initiator,
     auth: Option<OutgoingAuth>,
-    rtp: RtpEngineOffer,
+    rtp: MediaRtpEngineOffer,
 }
 
 pub struct SipOutgoingCall {
@@ -106,6 +106,7 @@ pub struct SipOutgoingCall {
 
 impl SipOutgoingCall {
     pub fn new(
+        media_api: MediaApi,
         endpoint: Endpoint,
         dialog_layer: LayerKey<DialogLayer>,
         invite_layer: LayerKey<InviteLayer>,
@@ -136,7 +137,7 @@ impl SipOutgoingCall {
                 initiator,
                 auth,
                 call_id,
-                rtp: RtpEngineOffer::new(&stream.gateway, &stream.token),
+                rtp: MediaRtpEngineOffer::new(media_api, stream),
             },
             state: State::Calling(CallingState::default()),
         })

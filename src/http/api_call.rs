@@ -1,39 +1,56 @@
+use std::sync::Arc;
+
+use poem::web::Query;
 use poem_openapi::{param::Path, payload::Json, OpenApi};
 use tokio::sync::{mpsc::Sender, oneshot};
 
-use crate::protocol::{CallApiError, CreateCallRequest, CreateCallResponse, UpdateCallRequest, UpdateCallResponse};
+use crate::{
+    protocol::{CallApiError, CreateCallRequest, CreateCallResponse, UpdateCallRequest, UpdateCallResponse},
+    secure::SecureContext,
+    sip::MediaApi,
+};
 
-use super::{header_xapi_key::HeaderXApiKey, response_result::ApiRes, HttpCommand};
+use super::{header_secret::TokenAuthorization, response_result::ApiRes, HttpCommand};
 
 pub struct CallApis {
-    pub secret: String,
+    pub media_gateway: String,
+    pub secure_ctx: Arc<SecureContext>,
     pub tx: Sender<HttpCommand>,
 }
 
 #[OpenApi]
 impl CallApis {
     #[oai(path = "/", method = "post")]
-    async fn create_call(&self, secret: HeaderXApiKey, data: Json<CreateCallRequest>) -> ApiRes<CreateCallResponse, CallApiError> {
-        if self.secret != secret.0.key {
+    async fn create_call(&self, secret: TokenAuthorization, data: Json<CreateCallRequest>) -> ApiRes<CreateCallResponse, CallApiError> {
+        // TODO dynamic with apps secret
+        if !self.secure_ctx.check_secret(&secret.0.token) {
             return Err(CallApiError::WrongSecret.into());
         }
+        let media_api = MediaApi::new(&self.media_gateway, &secret.0.token);
 
         let (tx, rx) = oneshot::channel();
-        self.tx.send(HttpCommand::CreateCall(data.0, tx)).await.map_err(|e| CallApiError::InternalChannel(e.to_string()))?;
+        self.tx
+            .send(HttpCommand::CreateCall(data.0, media_api, tx))
+            .await
+            .map_err(|e| CallApiError::InternalChannel(e.to_string()))?;
 
         let res = rx.await.map_err(|e| CallApiError::InternalChannel(e.to_string()))??;
         Ok(res.into())
     }
 
     #[oai(path = "/:call_id", method = "put")]
-    async fn update_call(&self, secret: HeaderXApiKey, Path(call): Path<String>, data: Json<UpdateCallRequest>) -> ApiRes<UpdateCallResponse, CallApiError> {
-        if self.secret != secret.0.key {
-            return Err(CallApiError::WrongSecret.into());
+    async fn update_call(&self, Path(call_id): Path<String>, Query(token): Query<String>, data: Json<UpdateCallRequest>) -> ApiRes<UpdateCallResponse, CallApiError> {
+        if let Some(token) = self.secure_ctx.decode_token(&token) {
+            if *token.call_id != call_id {
+                return Err(CallApiError::WrongToken.into());
+            }
+        } else {
+            return Err(CallApiError::WrongToken.into());
         }
 
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(HttpCommand::UpdateCall(call.into(), data.0, tx))
+            .send(HttpCommand::UpdateCall(call_id.into(), data.0, tx))
             .await
             .map_err(|e| CallApiError::InternalChannel(e.to_string()))?;
 
@@ -42,9 +59,13 @@ impl CallApis {
     }
 
     #[oai(path = "/:call_id", method = "delete")]
-    async fn encode_call(&self, secret: HeaderXApiKey, Path(call_id): Path<String>) -> ApiRes<String, CallApiError> {
-        if self.secret != secret.0.key {
-            return Err(CallApiError::WrongSecret.into());
+    async fn encode_call(&self, Query(token): Query<String>, Path(call_id): Path<String>) -> ApiRes<String, CallApiError> {
+        if let Some(token) = self.secure_ctx.decode_token(&token) {
+            if *token.call_id != call_id {
+                return Err(CallApiError::WrongToken.into());
+            }
+        } else {
+            return Err(CallApiError::WrongToken.into());
         }
 
         let (tx, rx) = oneshot::channel();

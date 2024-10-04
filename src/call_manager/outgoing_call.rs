@@ -5,7 +5,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use crate::{
     futures::select2,
     hook::HttpHookSender,
-    protocol::{InternalCallId, OutgoingCallEvent},
+    protocol::{InternalCallId, OutgoingCallEvent, OutgoingCallSipEvent},
     sip::{SipOutgoingCall, SipOutgoingCallError, SipOutgoingCallOut},
 };
 
@@ -80,15 +80,16 @@ async fn run_call_loop<EM: EventEmitter>(mut call: SipOutgoingCall, mut control_
             }
             select2::OrOutput::Left(Err(e)) => {
                 log::error!("[OutgoingCall] call error {e:?}");
-                let code = if let SipOutgoingCallError::Sip(code) = &e {
-                    *code
+                let event = if let SipOutgoingCallError::Sip(code) = &e {
+                    OutgoingCallEvent::Sip(OutgoingCallSipEvent::Failure { code: *code })
                 } else {
-                    0
+                    OutgoingCallEvent::Error { message: e.to_string() }
                 };
+
                 for emitter in emitters.values_mut() {
-                    emitter.fire(&OutgoingCallEvent::Failure { code });
+                    emitter.fire(&event);
                 }
-                hook.send(&OutgoingCallEvent::Failure { code });
+                hook.send(&event);
                 break;
             }
             select2::OrOutput::Right(Some(control)) => match control {
@@ -120,5 +121,11 @@ async fn run_call_loop<EM: EventEmitter>(mut call: SipOutgoingCall, mut control_
         }
     }
 
+    log::info!("[OutgoingCall] call destroyed");
+    let event = OutgoingCallEvent::Destroyed;
+    for emitter in emitters.values_mut() {
+        emitter.fire(&event);
+    }
+    hook.send(&event);
     destroy_tx.send(call_id).expect("should send destroy request to main loop");
 }

@@ -19,6 +19,8 @@ mod outgoing;
 
 pub use outgoing::{SipOutgoingCall, SipOutgoingCallError, SipOutgoingCallOut};
 
+use super::MediaApi;
+
 #[derive(Debug, Error)]
 pub enum SipServerError {
     #[error("Unknown error")]
@@ -56,7 +58,7 @@ impl SipServer {
         })
     }
 
-    pub fn make_call(&self, from: &str, to: &str, auth: Option<SipAuth>, stream: StreamingInfo) -> Result<SipOutgoingCall, SipOutgoingCallError> {
-        SipOutgoingCall::new(self.endpoint.clone(), self.dialog_layer, self.invite_layer, from, to, self.contact.clone(), auth, stream)
+    pub fn make_call(&self, media_api: MediaApi, from: &str, to: &str, auth: Option<SipAuth>, stream: StreamingInfo) -> Result<SipOutgoingCall, SipOutgoingCallError> {
+        SipOutgoingCall::new(media_api, self.endpoint.clone(), self.dialog_layer, self.invite_layer, from, to, self.contact.clone(), auth, stream)
     }
 }

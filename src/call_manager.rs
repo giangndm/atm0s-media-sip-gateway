@@ -1,4 +1,4 @@
-use std::{collections::HashMap, net::SocketAddr};
+use std::{collections::HashMap, net::SocketAddr, sync::Arc};
 
 use derive_more::derive::{Display, From};
 use outgoing_call::OutgoingCall;
@@ -9,8 +9,9 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use crate::{
     address_book::AddressBookStorage,
     hook::HttpHookSender,
-    protocol::{CallApiError, CreateCallRequest, CreateCallResponse, InternalCallId, UpdateCallRequest, UpdateCallResponse},
-    sip::SipServer,
+    protocol::{CallApiError, CallDirection, CreateCallRequest, CreateCallResponse, InternalCallId, UpdateCallRequest, UpdateCallResponse},
+    secure::{CallToken, SecureContext},
+    sip::{MediaApi, SipServer},
 };
 
 pub mod incoming_call;
@@ -43,10 +44,11 @@ pub struct CallManager<EM> {
     out_calls: HashMap<InternalCallId, OutgoingCall<EM>>,
     destroy_tx: UnboundedSender<InternalCallId>,
     destroy_rx: UnboundedReceiver<InternalCallId>,
+    secure_ctx: Arc<SecureContext>,
 }
 
 impl<EM: EventEmitter> CallManager<EM> {
-    pub async fn new(addr: SocketAddr, address_book: AddressBookStorage) -> Self {
+    pub async fn new(addr: SocketAddr, address_book: AddressBookStorage, secure_ctx: Arc<SecureContext>) -> Self {
         let sip = SipServer::new(addr, address_book).await.expect("should create sip-server");
         let (destroy_tx, destroy_rx) = unbounded_channel();
         Self {
@@ -54,19 +56,28 @@ impl<EM: EventEmitter> CallManager<EM> {
             sip,
             destroy_tx,
             destroy_rx,
+            secure_ctx,
         }
     }
 
-    pub fn create_call(&mut self, req: CreateCallRequest, hook: HttpHookSender) -> Result<CreateCallResponse, CallApiError> {
+    pub fn create_call(&mut self, req: CreateCallRequest, media_api: MediaApi, hook: HttpHookSender) -> Result<CreateCallResponse, CallApiError> {
         let from = format!("sip:{}@{}", req.from_number, req.sip_server);
         let to = format!("sip:{}@{}", req.to_number, req.sip_server);
-        match self.sip.make_call(&from, &to, req.sip_auth, req.streaming) {
+        match self.sip.make_call(media_api, &from, &to, req.sip_auth, req.streaming) {
             Ok(call) => {
                 let call_id = call.call_id();
+                let call_token = self.secure_ctx.encode_token(
+                    CallToken {
+                        direction: CallDirection::Outgoing,
+                        call_id: call_id.clone(),
+                    },
+                    3600,
+                );
                 self.out_calls.insert(call_id.clone(), OutgoingCall::new(call, self.destroy_tx.clone(), hook));
                 Ok(CreateCallResponse {
-                    ws: format!("/ws/call/{call_id}?token=fake-token-here"),
+                    ws: format!("/ws/call/{call_id}?token={call_token}"),
                     call_id: call_id.clone().into(),
+                    call_token,
                 })
             }
             Err(err) => Err(CallApiError::SipError(err.to_string())),

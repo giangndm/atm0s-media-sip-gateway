@@ -2,7 +2,7 @@ use ezk_sip_ua::invite::{create_ack, initiator::Early};
 
 use crate::{
     futures::select2,
-    protocol::OutgoingCallEvent,
+    protocol::{OutgoingCallEvent, OutgoingCallSipEvent},
     sip::server::outgoing::{talking_state::TalkingState, State},
 };
 
@@ -40,7 +40,7 @@ impl StateLogic for EarlyState {
                     // we dont exit here, after that Finished will be called
                     let code = response.line.code.into_u16();
                     log::info!("[EarlyState] on Failure {code}");
-                    Ok(Some(StateOut::Event(OutgoingCallEvent::Failure { code })))
+                    Ok(Some(StateOut::Event(OutgoingCallEvent::Sip(OutgoingCallSipEvent::Failure { code }))))
                 }
                 ezk_sip_ua::invite::initiator::Response::Early(_early, _tsx_response, _rseq) => {
                     unreachable!()
@@ -76,7 +76,10 @@ impl StateLogic for EarlyState {
                         ctx.rtp.set_answer(response.body.clone()).await?;
                     }
 
-                    Ok(Some(StateOut::Switch(State::Talking(TalkingState::new(session)), OutgoingCallEvent::Accepted { code })))
+                    Ok(Some(StateOut::Switch(
+                        State::Talking(TalkingState::new(session)),
+                        OutgoingCallEvent::Sip(OutgoingCallSipEvent::Accepted { code }),
+                    )))
                 }
                 ezk_sip_ua::invite::initiator::EarlyResponse::Terminated => {
                     log::info!("[EarlyState] on Terminated");

@@ -1,34 +1,23 @@
 use std::time::Duration;
 
 use bytes::Bytes;
-use thiserror::Error;
 
-#[derive(Debug, Error)]
-pub enum RtpEngineError {
-    #[error("Requwest error {0}")]
-    Reqwest(#[from] reqwest::Error),
-    #[error("Missing location header")]
-    MissingLocation,
-    #[error("Invalid localtion value")]
-    InvalidLocation,
-    #[error("Invalid status code ({0})")]
-    InvalidStatus(u16),
-    #[error("Invalid body")]
-    InvalidBody,
-}
+use crate::protocol::StreamingInfo;
 
-pub struct RtpEngineOffer {
-    gateway: String,
-    token: String,
+use super::{MediaApi, MediaEngineError};
+
+pub struct MediaRtpEngineOffer {
+    api: MediaApi,
+    stream: StreamingInfo,
     offer: Option<(String, Bytes)>,
     answered: bool,
 }
 
-impl RtpEngineOffer {
-    pub fn new(gateway: &str, token: &str) -> Self {
+impl MediaRtpEngineOffer {
+    pub fn new(api: MediaApi, stream: StreamingInfo) -> Self {
         Self {
-            gateway: gateway.to_string(),
-            token: token.to_string(),
+            api,
+            stream,
             offer: None,
             answered: false,
         }
@@ -42,36 +31,39 @@ impl RtpEngineOffer {
         self.answered
     }
 
-    pub async fn create_offer(&mut self) -> Result<Bytes, RtpEngineError> {
+    pub async fn create_offer(&mut self) -> Result<Bytes, MediaEngineError> {
         assert!(self.offer.is_none(), "should not call create_offer twice");
+        log::info!("[RtpEngineOffer] creating token");
+        let token = self.api.create_rtpengine_token(&self.stream.room, &self.stream.peer, self.stream.record).await?;
+        log::info!("[RtpEngineOffer] created token");
         log::info!("[RtpEngineOffer] creating offer");
         let res = reqwest::ClientBuilder::new()
             .timeout(Duration::from_secs(3))
             .build()
             .expect("Should create client")
-            .post(&format!("{}/rtpengine/offer", self.gateway))
-            .header("Authorization", format!("Bearer {}", self.token))
+            .post(&format!("{}/rtpengine/offer", self.api.gateway()))
+            .header("Authorization", format!("Bearer {}", token))
             .send()
             .await?;
 
         let status = res.status().as_u16();
 
         if status == 201 {
-            let endpoint = res.headers().get("Location").ok_or(RtpEngineError::MissingLocation)?;
-            let location = endpoint.to_str().map_err(|_e| RtpEngineError::InvalidLocation)?.to_string();
+            let endpoint = res.headers().get("Location").ok_or(MediaEngineError::MissingLocation)?;
+            let location = endpoint.to_str().map_err(|_e| MediaEngineError::InvalidLocation)?.to_string();
             let sdp = res.bytes().await?;
             log::info!("[RtpEngineOffer] created offer {location}");
             self.offer = Some((location, sdp.clone()));
             Ok(sdp)
         } else {
             log::error!("[RtpEngineOffer] create offer error {status}");
-            Err(RtpEngineError::InvalidStatus(status))
+            Err(MediaEngineError::InvalidStatus(status))
         }
     }
 
-    pub async fn set_answer(&mut self, sdp: Bytes) -> Result<(), RtpEngineError> {
+    pub async fn set_answer(&mut self, sdp: Bytes) -> Result<(), MediaEngineError> {
         let (location, _) = self.offer.as_ref().expect("should call after create_offer success");
-        let url = format!("{}{}", self.gateway, location);
+        let url = format!("{}{}", self.api.gateway(), location);
         log::info!("[RtpEngineOffer] sending answer {url}");
 
         let res = reqwest::ClientBuilder::new()
@@ -91,15 +83,15 @@ impl RtpEngineOffer {
             Ok(())
         } else {
             log::error!("[RtpEngineOffer] send answer error {url} {status}");
-            Err(RtpEngineError::InvalidStatus(status))
+            Err(MediaEngineError::InvalidStatus(status))
         }
     }
 }
 
-impl Drop for RtpEngineOffer {
+impl Drop for MediaRtpEngineOffer {
     fn drop(&mut self) {
         if let Some((location, _)) = self.offer.take() {
-            let url = format!("{}{}", self.gateway, location);
+            let url = format!("{}{}", self.api.gateway(), location);
             tokio::spawn(async move {
                 log::info!("[RtpEngineOffer] destroying {url}");
                 let res = reqwest::ClientBuilder::new()
@@ -116,7 +108,7 @@ impl Drop for RtpEngineOffer {
                     Ok(())
                 } else {
                     log::error!("[RtpEngineOffer] destroy error {url} {status}");
-                    Err(RtpEngineError::InvalidStatus(status))
+                    Err(MediaEngineError::InvalidStatus(status))
                 }
             });
         }

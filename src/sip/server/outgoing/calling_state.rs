@@ -3,7 +3,7 @@ use ezk_sip_types::header::typed::ContentType;
 use ezk_sip_ua::invite::{create_ack, initiator::Response};
 
 use crate::{
-    protocol::OutgoingCallEvent,
+    protocol::{OutgoingCallEvent, OutgoingCallSipEvent},
     sip::server::outgoing::{early_state::EarlyState, talking_state::TalkingState, State},
 };
 
@@ -46,7 +46,7 @@ impl StateLogic for CallingState {
             Response::Provisional(response) => {
                 let code = response.line.code.into_u16();
                 log::info!("[CallingState] on Provisional {code}");
-                Ok(Some(StateOut::Event(OutgoingCallEvent::Provisional { code })))
+                Ok(Some(StateOut::Event(OutgoingCallEvent::Sip(OutgoingCallSipEvent::Provisional { code }))))
             }
             Response::Failure(response) => {
                 // we dont exit here, after that Finished will be called
@@ -54,7 +54,7 @@ impl StateLogic for CallingState {
 
                 log::info!("[CallingState] on Failure {code}");
                 if code != 401 || self.auth_failed {
-                    return Ok(Some(StateOut::Event(OutgoingCallEvent::Failure { code })));
+                    return Ok(Some(StateOut::Event(OutgoingCallEvent::Sip(OutgoingCallSipEvent::Failure { code }))));
                 }
 
                 if let Some(auth) = &mut ctx.auth {
@@ -74,13 +74,16 @@ impl StateLogic for CallingState {
                     self.start(ctx).await?;
                     Ok(Some(StateOut::Continue))
                 } else {
-                    Ok(Some(StateOut::Event(OutgoingCallEvent::Failure { code })))
+                    Ok(Some(StateOut::Event(OutgoingCallEvent::Sip(OutgoingCallSipEvent::Failure { code }))))
                 }
             }
             Response::Early(early, response, _rseq) => {
                 let code = response.line.code.into_u16();
                 log::info!("[CallingState] switch early with code: {code}");
-                Ok(Some(StateOut::Switch(State::Early(EarlyState::new(early)), OutgoingCallEvent::Early { code })))
+                Ok(Some(StateOut::Switch(
+                    State::Early(EarlyState::new(early)),
+                    OutgoingCallEvent::Sip(OutgoingCallSipEvent::Early { code }),
+                )))
             }
             Response::Session(session, response) => {
                 let cseq_num = response.base_headers.cseq.cseq;
@@ -93,7 +96,10 @@ impl StateLogic for CallingState {
                     ctx.rtp.set_answer(response.body.clone()).await?;
                 }
 
-                Ok(Some(StateOut::Switch(State::Talking(TalkingState::new(session)), OutgoingCallEvent::Accepted { code })))
+                Ok(Some(StateOut::Switch(
+                    State::Talking(TalkingState::new(session)),
+                    OutgoingCallEvent::Sip(OutgoingCallSipEvent::Accepted { code }),
+                )))
             }
             Response::Finished => {
                 log::info!("[CallingState] on Finished");

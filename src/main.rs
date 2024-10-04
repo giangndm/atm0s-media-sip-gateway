@@ -1,8 +1,9 @@
-use std::{net::SocketAddr, time::Duration};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
 use clap::Parser;
 use rust_sip_wp::{
     address_book::{AddressBookStorage, AddressBookSync},
+    secure::SecureContext,
     Gateway, GatewayError,
 };
 
@@ -20,7 +21,7 @@ struct Args {
 
     /// Secret of this gateway
     #[arg(long, env, default_value = "insecure")]
-    secure: String,
+    secret: String,
 
     /// Address PhoneBook sync for incoming calls
     #[arg(long, env)]
@@ -33,6 +34,14 @@ struct Args {
     /// Http hook queues
     #[arg(long, env, default_value_t = 20)]
     http_hook_queues: usize,
+
+    /// MediaServer Gateway
+    #[arg(long, env)]
+    media_gateway: String,
+
+    /// MediaServer Apps sync endpoint
+    #[arg(long, env)]
+    media_app_sync: Option<String>,
 }
 
 #[tokio::main]
@@ -40,6 +49,8 @@ async fn main() -> Result<(), GatewayError> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
     log::info!("Starting server with http port {} and sip port {}", args.http, args.sip);
+
+    let secure_ctx = Arc::new(SecureContext::new(&args.secret));
 
     let address_book = AddressBookStorage::default();
     if let Some(sync_url) = args.phone_numbers_sync {
@@ -50,7 +61,7 @@ async fn main() -> Result<(), GatewayError> {
         });
     }
 
-    let mut gateway = Gateway::new(args.http, &args.secure, args.sip, address_book, args.http_hook_queues).await?;
+    let mut gateway = Gateway::new(args.http, args.sip, address_book, args.http_hook_queues, &args.media_gateway, secure_ctx).await?;
     loop {
         if let Err(e) = gateway.recv().await {
             log::error!("gateway error {e:?}");

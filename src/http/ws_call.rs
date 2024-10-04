@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
 use crate::{
     call_manager::{EmitterId, EventEmitter},
     futures::select2::{self, OrOutput},
     protocol::InternalCallId,
+    secure::SecureContext,
 };
 
 use super::HttpCommand;
@@ -10,24 +13,46 @@ use poem::{
     handler,
     web::{
         websocket::{Message, WebSocket},
-        Data, Path,
+        Data, Path, Query,
     },
-    IntoResponse,
+    IntoResponse, Response,
 };
-use serde::Serialize;
+use reqwest::StatusCode;
+use serde::{Deserialize, Serialize};
 use tokio::sync::{
     mpsc::{unbounded_channel, Sender, UnboundedSender},
     oneshot,
 };
 
+#[derive(Clone)]
+pub struct WebsocketCtx {
+    pub secure_ctx: Arc<SecureContext>,
+    pub cmd_tx: Sender<HttpCommand>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct WsQuery {
+    token: String,
+}
+
 #[handler]
-pub fn ws_single_call(Path(call_id): Path<String>, ws: WebSocket, data: Data<&Sender<HttpCommand>>) -> impl IntoResponse {
-    let cmd_tx = data.clone();
+pub fn ws_single_call(Path(call_id): Path<String>, Query(query): Query<WsQuery>, ws: WebSocket, data: Data<&WebsocketCtx>) -> impl IntoResponse {
+    let token = query.token;
+    if let Some(token) = data.secure_ctx.decode_token(&token) {
+        if *token.call_id != call_id {
+            return Response::builder().status(StatusCode::BAD_REQUEST).finish();
+        }
+    } else {
+        return Response::builder().status(StatusCode::UNAUTHORIZED).finish();
+    }
+
+    let cmd_tx = data.cmd_tx.clone();
     ws.on_upgrade(move |socket| async move {
         let (mut sink, mut stream) = socket.split();
         let emitter_id = EmitterId::rand();
         let call_id: InternalCallId = call_id.into();
         let (out_tx, mut out_rx) = unbounded_channel();
+        let _out_tx = out_tx.clone(); //we need to store it for avoiding ws error when call dropped
         let emitter = WebsocketEventEmitter { emitter_id, out_tx };
 
         let (tx, rx) = oneshot::channel();
@@ -92,6 +117,7 @@ pub fn ws_single_call(Path(call_id): Path<String>, ws: WebSocket, data: Data<&Se
             }
         }
     })
+    .into_response()
 }
 
 pub struct WebsocketEventEmitter {
