@@ -6,7 +6,7 @@ use super::{CallActionRequest, InternalCallId};
 #[serde(tag = "type")]
 pub enum IncomingCallSipEvent {
     Cancelled,
-    Bye {},
+    Bye,
 }
 
 #[derive(Debug, Serialize)]

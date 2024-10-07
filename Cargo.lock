@@ -648,7 +648,7 @@ dependencies = [
 [[package]]
 name = "ezk-internal"
 version = "0.2.0"
-source = "git+https://github.com/giangndm/ezk.git?branch=feat-cancel-call#ad4f4a96b2fb5a48e9212ab7482fd4770347d0c9"
+source = "git+https://github.com/giangndm/ezk.git?rev=fa946fa6517596b5c189cac9d9cdf8ad8379f170#fa946fa6517596b5c189cac9d9cdf8ad8379f170"
 dependencies = [
  "nom",
 ]
@@ -656,7 +656,7 @@ dependencies = [
 [[package]]
 name = "ezk-sdp-types"
 version = "0.3.0"
-source = "git+https://github.com/giangndm/ezk.git?branch=feat-cancel-call#ad4f4a96b2fb5a48e9212ab7482fd4770347d0c9"
+source = "git+https://github.com/giangndm/ezk.git?rev=fa946fa6517596b5c189cac9d9cdf8ad8379f170#fa946fa6517596b5c189cac9d9cdf8ad8379f170"
 dependencies = [
  "bytes",
  "bytesstr",
@@ -668,7 +668,7 @@ dependencies = [
 [[package]]
 name = "ezk-sip-auth"
 version = "0.1.2"
-source = "git+https://github.com/giangndm/ezk.git?branch=feat-cancel-call#ad4f4a96b2fb5a48e9212ab7482fd4770347d0c9"
+source = "git+https://github.com/giangndm/ezk.git?rev=fa946fa6517596b5c189cac9d9cdf8ad8379f170#fa946fa6517596b5c189cac9d9cdf8ad8379f170"
 dependencies = [
  "bytesstr",
  "ezk-sip-types",
@@ -682,7 +682,7 @@ dependencies = [
 [[package]]
 name = "ezk-sip-core"
 version = "0.3.0"
-source = "git+https://github.com/giangndm/ezk.git?branch=feat-cancel-call#ad4f4a96b2fb5a48e9212ab7482fd4770347d0c9"
+source = "git+https://github.com/giangndm/ezk.git?rev=fa946fa6517596b5c189cac9d9cdf8ad8379f170#fa946fa6517596b5c189cac9d9cdf8ad8379f170"
 dependencies = [
  "async-trait",
  "bytes",
@@ -708,7 +708,7 @@ dependencies = [
 [[package]]
 name = "ezk-sip-types"
 version = "0.2.1"
-source = "git+https://github.com/giangndm/ezk.git?branch=feat-cancel-call#ad4f4a96b2fb5a48e9212ab7482fd4770347d0c9"
+source = "git+https://github.com/giangndm/ezk.git?rev=fa946fa6517596b5c189cac9d9cdf8ad8379f170#fa946fa6517596b5c189cac9d9cdf8ad8379f170"
 dependencies = [
  "anyhow",
  "bytes",
@@ -725,7 +725,7 @@ dependencies = [
 [[package]]
 name = "ezk-sip-ua"
 version = "0.4.2"
-source = "git+https://github.com/giangndm/ezk.git?branch=feat-cancel-call#ad4f4a96b2fb5a48e9212ab7482fd4770347d0c9"
+source = "git+https://github.com/giangndm/ezk.git?rev=fa946fa6517596b5c189cac9d9cdf8ad8379f170#fa946fa6517596b5c189cac9d9cdf8ad8379f170"
 dependencies = [
  "async-trait",
  "bytes",
@@ -744,7 +744,7 @@ dependencies = [
 [[package]]
 name = "ezk-stun"
 version = "0.2.0"
-source = "git+https://github.com/giangndm/ezk.git?branch=feat-cancel-call#ad4f4a96b2fb5a48e9212ab7482fd4770347d0c9"
+source = "git+https://github.com/giangndm/ezk.git?rev=fa946fa6517596b5c189cac9d9cdf8ad8379f170#fa946fa6517596b5c189cac9d9cdf8ad8379f170"
 dependencies = [
  "async-trait",
  "bytes",
@@ -758,7 +758,7 @@ dependencies = [
 [[package]]
 name = "ezk-stun-types"
 version = "0.1.2"
-source = "git+https://github.com/giangndm/ezk.git?branch=feat-cancel-call#ad4f4a96b2fb5a48e9212ab7482fd4770347d0c9"
+source = "git+https://github.com/giangndm/ezk.git?rev=fa946fa6517596b5c189cac9d9cdf8ad8379f170#fa946fa6517596b5c189cac9d9cdf8ad8379f170"
 dependencies = [
  "bitfield",
  "byteorder",

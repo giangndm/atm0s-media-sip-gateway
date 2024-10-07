@@ -47,7 +47,7 @@ impl StateLogic for TalkingState {
             ezk_sip_ua::invite::session::Event::ReInviteReceived(_re_invite_received) => Ok(Some(StateOut::Continue)),
             ezk_sip_ua::invite::session::Event::Bye(_) => {
                 log::info!("[TalkingState] on Bye");
-                Ok(Some(StateOut::Event(IncomingCallEvent::Sip(IncomingCallSipEvent::Bye {}))))
+                Ok(Some(StateOut::Event(IncomingCallEvent::Sip(IncomingCallSipEvent::Bye))))
             }
             ezk_sip_ua::invite::session::Event::Terminated => {
                 log::info!("[TalkingState] on Terminated");

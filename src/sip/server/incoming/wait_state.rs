@@ -82,7 +82,7 @@ impl StateLogic for WaitState {
     fn kill_because_validate_failed(mut self, _ctx: &mut Ctx) {
         let acceptor = self.acceptor.take().expect("should have acceptor when kill called");
         tokio::spawn(async move {
-            reject_call(acceptor, Code::SERVICE_UNAVAILABLE).await.print_error("[SipIncoming] reject call");
+            reject_call(acceptor, Code::NOT_ACCEPTABLE).await.print_error("[SipIncoming] reject call");
         });
     }
 
