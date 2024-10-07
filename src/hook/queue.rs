@@ -29,9 +29,9 @@ impl HttpHookQueue {
         let req = self.rx.recv().await.expect("should receive");
         log::info!("[HttpHookQueue] sending hook to {}", req.endpoint);
         if let Err(e) = self.send(&req).await {
-            log::info!("[HttpHookQueue] send hook to {} error {e:?}", req.endpoint);
+            log::error!("[HttpHookQueue] send hook to {} error {e:?}", req.endpoint);
         } else {
-            log::error!("[HttpHookQueue] sent hook to {}", req.endpoint);
+            log::info!("[HttpHookQueue] sent hook to {}", req.endpoint);
         }
     }
 }
