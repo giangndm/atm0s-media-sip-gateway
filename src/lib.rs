@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io, net::SocketAddr, sync::Arc};
+use std::{io, net::SocketAddr, sync::Arc};
 
 use address_book::AddressBookStorage;
 use call_manager::CallManager;
@@ -11,6 +11,7 @@ use tokio::sync::mpsc::Receiver;
 
 pub mod address_book;
 pub mod call_manager;
+mod error;
 pub mod futures;
 pub mod hook;
 pub mod http;
@@ -30,7 +31,6 @@ pub enum GatewayError {
 
 pub struct Gateway {
     http_rx: Receiver<HttpCommand>,
-    http_hook: HttpHook,
     call_manager: CallManager<WebsocketEventEmitter>,
 }
 
@@ -38,11 +38,11 @@ impl Gateway {
     pub async fn new(http: SocketAddr, sip: SocketAddr, address_book: AddressBookStorage, http_hook_queues: usize, media_gateway: &str, secure_ctx: Arc<SecureContext>) -> Result<Self, GatewayError> {
         let (mut http, http_rx) = HttpServer::new(http, media_gateway, secure_ctx.clone());
         tokio::spawn(async move { http.run_loop().await });
+        let http_hook = HttpHook::new(http_hook_queues);
 
         Ok(Self {
             http_rx,
-            http_hook: HttpHook::new(http_hook_queues),
-            call_manager: CallManager::new(sip, address_book, secure_ctx).await,
+            call_manager: CallManager::new(sip, address_book, secure_ctx, http_hook, media_gateway).await,
         })
     }
 
@@ -51,18 +51,14 @@ impl Gateway {
         match out {
             select2::OrOutput::Left(cmd) => match cmd.expect("internal channel error") {
                 HttpCommand::CreateCall(req, media_api, sender) => {
-                    let hook_sender = self.http_hook.new_sender(&req.hook, HashMap::new());
-                    let res = self.call_manager.create_call(req, media_api, hook_sender);
+                    let res = self.call_manager.create_call(req, media_api);
                     if let Err(e) = sender.send(res) {
                         log::warn!("[Gateway] sending create_call response error {e:?}");
                     }
                     Ok(())
                 }
-                HttpCommand::UpdateCall(call_id, req, sender) => {
-                    let res = self.call_manager.update_call(call_id, req);
-                    if let Err(e) = sender.send(res) {
-                        log::warn!("[Gateway] sending create_call response error {e:?}");
-                    }
+                HttpCommand::ActionCall(call_id, req, sender) => {
+                    self.call_manager.action_call(call_id, req, sender);
                     Ok(())
                 }
                 HttpCommand::EndCall(call_id, sender) => {

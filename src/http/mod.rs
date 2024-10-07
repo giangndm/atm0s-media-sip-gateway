@@ -2,7 +2,7 @@ use std::{io, net::SocketAddr, sync::Arc};
 
 use crate::{
     call_manager::EmitterId,
-    protocol::{CallApiError, CreateCallRequest, CreateCallResponse, InternalCallId, UpdateCallRequest, UpdateCallResponse},
+    protocol::{CallActionRequest, CallApiError, CreateCallRequest, CreateCallResponse, InternalCallId},
     secure::SecureContext,
     sip::MediaApi,
 };
@@ -23,7 +23,7 @@ pub use ws_call::WebsocketEventEmitter;
 
 pub enum HttpCommand {
     CreateCall(CreateCallRequest, MediaApi, oneshot::Sender<Result<CreateCallResponse, CallApiError>>),
-    UpdateCall(InternalCallId, UpdateCallRequest, oneshot::Sender<Result<UpdateCallResponse, CallApiError>>),
+    ActionCall(InternalCallId, CallActionRequest, oneshot::Sender<anyhow::Result<()>>),
     EndCall(InternalCallId, oneshot::Sender<Result<(), CallApiError>>),
     SubscribeCall(InternalCallId, WebsocketEventEmitter, oneshot::Sender<Result<(), CallApiError>>),
     UnsubscribeCall(InternalCallId, EmitterId, oneshot::Sender<Result<(), CallApiError>>),

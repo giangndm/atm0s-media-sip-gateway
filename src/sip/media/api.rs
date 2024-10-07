@@ -20,7 +20,7 @@ struct TokenData {
 
 #[derive(Deserialize)]
 struct CreateTokenResponse {
-    status: bool,
+    // status: bool,
     error: Option<String>,
     data: Option<TokenData>,
 }

@@ -36,3 +36,4 @@ bytesstr = "1.0.2"
 jwt-simple = { version = "0.12", default-features = false, features = [
     "pure-rust",
 ] }
+anyhow = "1.0"

@@ -5,7 +5,7 @@ use poem_openapi::{param::Path, payload::Json, OpenApi};
 use tokio::sync::{mpsc::Sender, oneshot};
 
 use crate::{
-    protocol::{CallApiError, CreateCallRequest, CreateCallResponse, UpdateCallRequest, UpdateCallResponse},
+    protocol::{CallActionRequest, CallActionResponse, CallApiError, CreateCallRequest, CreateCallResponse},
     secure::SecureContext,
     sip::MediaApi,
 };
@@ -38,8 +38,8 @@ impl CallApis {
         Ok(res.into())
     }
 
-    #[oai(path = "/:call_id", method = "put")]
-    async fn update_call(&self, Path(call_id): Path<String>, Query(token): Query<String>, data: Json<UpdateCallRequest>) -> ApiRes<UpdateCallResponse, CallApiError> {
+    #[oai(path = "/:call_id/action", method = "post")]
+    async fn action_call(&self, Path(call_id): Path<String>, Query(token): Query<String>, data: Json<CallActionRequest>) -> ApiRes<CallActionResponse, CallApiError> {
         if let Some(token) = self.secure_ctx.decode_token(&token) {
             if *token.call_id != call_id {
                 return Err(CallApiError::WrongToken.into());
@@ -50,12 +50,12 @@ impl CallApis {
 
         let (tx, rx) = oneshot::channel();
         self.tx
-            .send(HttpCommand::UpdateCall(call_id.into(), data.0, tx))
+            .send(HttpCommand::ActionCall(call_id.into(), data.0, tx))
             .await
             .map_err(|e| CallApiError::InternalChannel(e.to_string()))?;
 
-        let res = rx.await.map_err(|e| CallApiError::InternalChannel(e.to_string()))??;
-        Ok(res.into())
+        rx.await.map_err(|e| CallApiError::InternalChannel(e.to_string()))?.map_err(|e| CallApiError::SipError(e.to_string()))?;
+        Ok(CallActionResponse {}.into())
     }
 
     #[oai(path = "/:call_id", method = "delete")]

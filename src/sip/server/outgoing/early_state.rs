@@ -22,6 +22,7 @@ impl StateLogic for EarlyState {
     async fn start(&mut self, _ctx: &mut Ctx) -> Result<(), SipOutgoingCallError> {
         Ok(())
     }
+
     async fn end(&mut self, ctx: &mut Ctx) -> Result<(), SipOutgoingCallError> {
         let mut cancel = ctx.initiator.create_cancel();
         if let Some(auth) = &mut ctx.auth {
@@ -30,6 +31,7 @@ impl StateLogic for EarlyState {
         ctx.initiator.send_cancel(cancel).await?;
         Ok(())
     }
+
     async fn recv(&mut self, ctx: &mut Ctx) -> Result<Option<StateOut>, SipOutgoingCallError> {
         match select2::or(ctx.initiator.receive(), self.early.receive()).await {
             select2::OrOutput::Left(event) => match event? {
