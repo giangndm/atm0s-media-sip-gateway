@@ -20,9 +20,10 @@ pub struct CreateCallRequest {
 
 #[derive(Debug, Object)]
 pub struct CreateCallResponse {
+    pub gateway: String,
     pub call_id: String,
     pub call_token: String,
-    pub ws: String,
+    pub call_ws: String,
 }
 
 #[derive(Debug, Serialize)]

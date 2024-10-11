@@ -18,6 +18,7 @@ use crate::{
     protocol::{CallActionRequest, CallActionResponse, CallApiError, CallDirection, CreateCallRequest, CreateCallResponse, InternalCallId, WsMessage},
     secure::{CallToken, SecureContext},
     sip::{MediaApi, SipServer},
+    utils::http_to_ws,
 };
 
 pub mod incoming_call;
@@ -51,6 +52,7 @@ pub enum CallManagerOut {
 }
 
 pub struct CallManager<EM> {
+    http_public: String,
     sip: SipServer,
     http_hook: HttpHook,
     out_calls: HashMap<InternalCallId, OutgoingCall<EM>>,
@@ -63,10 +65,11 @@ pub struct CallManager<EM> {
 }
 
 impl<EM: EventEmitter> CallManager<EM> {
-    pub async fn new(addr: SocketAddr, address_book: AddressBookStorage, secure_ctx: Arc<SecureContext>, http_hook: HttpHook, media_gateway: &str) -> Self {
-        let sip = SipServer::new(addr).await.expect("should create sip-server");
+    pub async fn new(sip_addr: SocketAddr, http_public: &str, address_book: AddressBookStorage, secure_ctx: Arc<SecureContext>, http_hook: HttpHook, media_gateway: &str) -> Self {
+        let sip = SipServer::new(sip_addr).await.expect("should create sip-server");
         let (destroy_tx, destroy_rx) = unbounded_channel();
         Self {
+            http_public: http_public.to_owned(),
             sip,
             http_hook,
             out_calls: HashMap::new(),
@@ -95,7 +98,8 @@ impl<EM: EventEmitter> CallManager<EM> {
                 );
                 self.out_calls.insert(call_id.clone(), OutgoingCall::new(call, self.destroy_tx.clone(), hook_sender));
                 Ok(CreateCallResponse {
-                    ws: format!("/ws/call/{call_id}?token={call_token}"),
+                    gateway: self.http_public.clone(),
+                    call_ws: format!("{}/ws/call/{call_id}?token={call_token}", http_to_ws(&self.http_public)),
                     call_id: call_id.clone().into(),
                     call_token,
                 })
@@ -174,7 +178,7 @@ impl<EM: EventEmitter> CallManager<EM> {
                             3600,
                         );
                         let api: MediaApi = MediaApi::new(&self.media_gateway, &number.app_secret);
-                        let call = IncomingCall::new(api, call, call_token, self.destroy_tx.clone(), hook_sender);
+                        let call = IncomingCall::new(&self.http_public, api, call, call_token, self.destroy_tx.clone(), hook_sender);
                         self.in_calls.insert(call_id, call);
                         Some(CallManagerOut::IncomingCall())
                     } else {

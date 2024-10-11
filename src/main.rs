@@ -11,13 +11,17 @@ use rust_sip_wp::{
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    /// Address for http server
+    /// Listen Address for http server
     #[arg(long, env, default_value = "0.0.0.0:8008")]
-    http: SocketAddr,
+    http_addr: SocketAddr,
+
+    /// Public URL for http server
+    #[arg(long, env, default_value = "http://127.0.0.1:8008")]
+    http_public: String,
 
     /// Address for sip server
     #[arg(long, env, default_value = "0.0.0.0:5060")]
-    sip: SocketAddr,
+    sip_addr: SocketAddr,
 
     /// Secret of this gateway
     #[arg(long, env, default_value = "insecure")]
@@ -48,7 +52,7 @@ struct Args {
 async fn main() -> Result<(), GatewayError> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
-    log::info!("Starting server with http port {} and sip port {}", args.http, args.sip);
+    log::info!("Starting server with addr {}, public endpoint {} and sip port {}", args.http_addr, args.http_public, args.sip_addr);
 
     let secure_ctx = Arc::new(SecureContext::new(&args.secret));
 
@@ -61,7 +65,7 @@ async fn main() -> Result<(), GatewayError> {
         });
     }
 
-    let mut gateway = Gateway::new(args.http, args.sip, address_book, args.http_hook_queues, &args.media_gateway, secure_ctx).await?;
+    let mut gateway = Gateway::new(args.http_addr, &args.http_public, args.sip_addr, address_book, args.http_hook_queues, &args.media_gateway, secure_ctx).await?;
     loop {
         if let Err(e) = gateway.recv().await {
             log::error!("gateway error {e:?}");

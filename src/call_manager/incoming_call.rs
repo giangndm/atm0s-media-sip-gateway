@@ -12,6 +12,7 @@ use crate::{
     hook::HttpHookSender,
     protocol::{CallAction, CallActionRequest, CallActionResponse, HookIncomingCallRequest, HookIncomingCallResponse, IncomingCallEvent, InternalCallId},
     sip::{MediaApi, SipIncomingCall, SipIncomingCallOut},
+    utils::http_to_ws,
 };
 
 use super::{EmitterId, EventEmitter};
@@ -21,11 +22,12 @@ pub struct IncomingCall<EM> {
 }
 
 impl<EM: EventEmitter> IncomingCall<EM> {
-    pub fn new(api: MediaApi, sip: SipIncomingCall, call_token: String, destroy_tx: UnboundedSender<InternalCallId>, hook: HttpHookSender) -> Self {
+    pub fn new(http_public: &str, api: MediaApi, sip: SipIncomingCall, call_token: String, destroy_tx: UnboundedSender<InternalCallId>, hook: HttpHookSender) -> Self {
         let (control_tx, control_rx) = unbounded_channel();
+        let http_public = http_public.to_owned();
         tokio::spawn(async move {
             let call_id = sip.call_id();
-            if let Err(e) = run_call_loop(api, sip, call_token, control_rx, hook).await {
+            if let Err(e) = run_call_loop(&http_public, api, sip, call_token, control_rx, hook).await {
                 log::error!("[IncomingCall] call {call_id} error {e:?}");
             }
             destroy_tx.send(call_id).expect("should send destroy request to main loop");
@@ -66,14 +68,21 @@ enum CallControl<EM> {
     End,
 }
 
-async fn run_call_loop<EM: EventEmitter>(api: MediaApi, mut call: SipIncomingCall, call_token: String, mut control_rx: UnboundedReceiver<CallControl<EM>>, hook: HttpHookSender) -> anyhow::Result<()> {
+async fn run_call_loop<EM: EventEmitter>(
+    http_public: &str,
+    api: MediaApi,
+    mut call: SipIncomingCall,
+    call_token: String,
+    mut control_rx: UnboundedReceiver<CallControl<EM>>,
+    hook: HttpHookSender,
+) -> anyhow::Result<()> {
     let call_id = call.call_id();
     let from = call.from().to_owned();
     let to = call.to().to_owned();
 
     let mut emitters: HashMap<EmitterId, EM> = HashMap::new();
-    let ws = format!("/ws/call/{call_id}?token={call_token}");
-    log::info!("[IncomingCall] call {call_id} start, ws: {ws}, sending hook ...");
+    let call_ws = format!("{}/ws/call/{call_id}?token={call_token}", http_to_ws(http_public));
+    log::info!("[IncomingCall] call {call_id} start, ws: {call_ws}, sending hook ...");
 
     // we send trying first
     call.send_trying().await?;
@@ -81,11 +90,12 @@ async fn run_call_loop<EM: EventEmitter>(api: MediaApi, mut call: SipIncomingCal
     // feedback hook for info
     let res: HookIncomingCallResponse = hook
         .request(&HookIncomingCallRequest {
+            gateway: http_public.to_owned(),
             call_id: call_id.clone(),
+            call_token,
+            call_ws,
             from,
             to,
-            ws,
-            call_token,
         })
         .await?;
 

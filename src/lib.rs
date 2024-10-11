@@ -18,6 +18,7 @@ pub mod http;
 pub mod protocol;
 pub mod secure;
 pub mod sip;
+pub mod utils;
 
 #[derive(Error, Debug)]
 pub enum GatewayError {
@@ -35,14 +36,22 @@ pub struct Gateway {
 }
 
 impl Gateway {
-    pub async fn new(http: SocketAddr, sip: SocketAddr, address_book: AddressBookStorage, http_hook_queues: usize, media_gateway: &str, secure_ctx: Arc<SecureContext>) -> Result<Self, GatewayError> {
-        let (mut http, http_rx) = HttpServer::new(http, media_gateway, secure_ctx.clone());
+    pub async fn new(
+        http_addr: SocketAddr,
+        http_public: &str,
+        sip_addr: SocketAddr,
+        address_book: AddressBookStorage,
+        http_hook_queues: usize,
+        media_gateway: &str,
+        secure_ctx: Arc<SecureContext>,
+    ) -> Result<Self, GatewayError> {
+        let (mut http, http_rx) = HttpServer::new(http_addr, media_gateway, secure_ctx.clone());
         tokio::spawn(async move { http.run_loop().await });
         let http_hook = HttpHook::new(http_hook_queues);
 
         Ok(Self {
             http_rx,
-            call_manager: CallManager::new(sip, address_book, secure_ctx, http_hook, media_gateway).await,
+            call_manager: CallManager::new(sip_addr, http_public, address_book, secure_ctx, http_hook, media_gateway).await,
         })
     }
 

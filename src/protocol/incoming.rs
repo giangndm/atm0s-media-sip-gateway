@@ -20,11 +20,12 @@ pub enum IncomingCallEvent {
 
 #[derive(Debug, Serialize)]
 pub struct HookIncomingCallRequest {
+    pub gateway: String,
     pub call_id: InternalCallId,
+    pub call_token: String,
+    pub call_ws: String,
     pub from: String,
     pub to: String,
-    pub call_token: String,
-    pub ws: String,
 }
 
 pub type HookIncomingCallResponse = CallActionRequest;
