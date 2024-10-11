@@ -28,7 +28,7 @@ pub struct SipAuth {
     pub password: String,
 }
 
-#[derive(Debug, Object, Deserialize)]
+#[derive(Debug, Object, Serialize, Deserialize)]
 pub struct StreamingInfo {
     pub room: String,
     pub peer: String,

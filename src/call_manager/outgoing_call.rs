@@ -67,8 +67,9 @@ async fn run_call_loop<EM: EventEmitter>(mut call: SipOutgoingCall, mut control_
         match out {
             select2::OrOutput::Left(Ok(Some(out))) => match out {
                 SipOutgoingCallOut::Event(event) => {
+                    let value = serde_json::to_value(&event).expect("should convert to json");
                     for emitter in emitters.values_mut() {
-                        emitter.fire(&event);
+                        emitter.fire(value.clone().into());
                     }
                     hook.send(&event);
                 }
@@ -86,8 +87,9 @@ async fn run_call_loop<EM: EventEmitter>(mut call: SipOutgoingCall, mut control_
                     OutgoingCallEvent::Error { message: e.to_string() }
                 };
 
+                let value = serde_json::to_value(&event).expect("should convert to json");
                 for emitter in emitters.values_mut() {
-                    emitter.fire(&event);
+                    emitter.fire(value.clone().into());
                 }
                 hook.send(&event);
                 break;
@@ -123,8 +125,9 @@ async fn run_call_loop<EM: EventEmitter>(mut call: SipOutgoingCall, mut control_
 
     log::info!("[OutgoingCall] call destroyed");
     let event = OutgoingCallEvent::Destroyed;
+    let value = serde_json::to_value(&event).expect("should convert to json");
     for emitter in emitters.values_mut() {
-        emitter.fire(&event);
+        emitter.fire(value.clone().into());
     }
     hook.send(&event);
     destroy_tx.send(call_id).expect("should send destroy request to main loop");

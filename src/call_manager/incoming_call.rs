@@ -111,8 +111,9 @@ async fn run_call_loop<EM: EventEmitter>(api: MediaApi, mut call: SipIncomingCal
         match out {
             select2::OrOutput::Left(Ok(Some(out))) => match out {
                 SipIncomingCallOut::Event(event) => {
+                    let value = serde_json::to_value(&event).expect("should convert to json");
                     for emitter in emitters.values_mut() {
-                        emitter.fire(&event);
+                        emitter.fire(value.clone().into());
                     }
                     hook.send(&event);
                 }
@@ -125,9 +126,9 @@ async fn run_call_loop<EM: EventEmitter>(api: MediaApi, mut call: SipIncomingCal
             select2::OrOutput::Left(Err(e)) => {
                 log::error!("[IncomingCall] call {call_id} error {e:?}");
                 let event = IncomingCallEvent::Error { message: e.to_string() };
-
+                let value = serde_json::to_value(&event).expect("should convert to json");
                 for emitter in emitters.values_mut() {
-                    emitter.fire(&event);
+                    emitter.fire(value.clone().into());
                 }
                 hook.send(&event);
                 break;
@@ -178,8 +179,9 @@ async fn run_call_loop<EM: EventEmitter>(api: MediaApi, mut call: SipIncomingCal
 
     log::info!("[IncomingCall] call {call_id} destroyed");
     let event = IncomingCallEvent::Destroyed;
+    let value = serde_json::to_value(&event).expect("should convert to json");
     for emitter in emitters.values_mut() {
-        emitter.fire(&event);
+        emitter.fire(value.clone().into());
     }
     hook.send(&event);
     Ok(())

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::{
     call_manager::{EmitterId, EventEmitter},
     futures::select2::{self, OrOutput},
-    protocol::{CallActionRequest, CallActionResponse, InternalCallId},
+    protocol::{InternalCallId, WsActionResponse, WsMessage},
     secure::SecureContext,
 };
 
@@ -18,7 +18,7 @@ use poem::{
     IntoResponse, Response,
 };
 use reqwest::StatusCode;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use tokio::sync::{
     mpsc::{unbounded_channel, Sender, UnboundedSender},
     oneshot,
@@ -33,20 +33,6 @@ pub struct WebsocketCtx {
 #[derive(Debug, Deserialize)]
 pub struct WsQuery {
     token: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct WsActionRequest {
-    request_id: u32,
-    request: CallActionRequest,
-}
-
-#[derive(Debug, Serialize, Default)]
-pub struct WsActionResponse {
-    request_id: Option<u32>,
-    success: bool,
-    message: Option<String>,
-    response: Option<CallActionResponse>,
 }
 
 #[handler]
@@ -92,8 +78,9 @@ pub fn ws_single_call(Path(call_id): Path<String>, Query(query): Query<WsQuery>,
         loop {
             let out = select2::or(out_rx.recv(), stream.next()).await;
             match out {
-                OrOutput::Left(Some(out)) => {
-                    if let Err(e) = sink.send(Message::Text(out)).await {
+                OrOutput::Left(Some(event)) => {
+                    let msg = serde_json::to_string(&event).expect("should convert to json string");
+                    if let Err(e) = sink.send(Message::Text(msg)).await {
                         log::error!("[WsCall {call_id}/{emitter_id}] send data error {e:?}");
                         break;
                     }
@@ -103,8 +90,8 @@ pub fn ws_single_call(Path(call_id): Path<String>, Query(query): Query<WsQuery>,
                 }
                 OrOutput::Right(Some(Ok(message))) => {
                     if let Message::Text(msg) = message {
-                        match serde_json::from_str::<WsActionRequest>(&msg) {
-                            Ok(req) => {
+                        match serde_json::from_str::<WsMessage>(&msg) {
+                            Ok(WsMessage::Request(req)) => {
                                 log::error!("[WsCall {call_id}/{emitter_id}] on incoming req {} {:?}", req.request_id, req.request);
                                 let (tx, rx) = oneshot::channel();
                                 let out_tx = out_tx.clone();
@@ -136,20 +123,26 @@ pub fn ws_single_call(Path(call_id): Path<String>, Query(query): Query<WsQuery>,
                                         },
                                     };
                                     log::info!("[WsCall {call_id}/{emitter_id}] response incoming req {} {res:?}", req.request_id);
-                                    let _ = out_tx.send(serde_json::to_string(&res).expect("should parse to json"));
+                                    let _ = out_tx.send(WsMessage::Response(res));
                                 });
+                            }
+                            Ok(_) => {
+                                log::error!("[WsCall {call_id}/{emitter_id}] parse incoming req {msg} unsupported type");
+                                let _ = out_tx.send(WsMessage::Response(WsActionResponse {
+                                    request_id: None,
+                                    success: false,
+                                    message: Some("unsupported type".to_string()),
+                                    response: None,
+                                }));
                             }
                             Err(err) => {
                                 log::error!("[WsCall {call_id}/{emitter_id}] parse incoming req {msg} error {err}");
-                                let _ = out_tx.send(
-                                    serde_json::to_string(&WsActionResponse {
-                                        request_id: None,
-                                        success: false,
-                                        message: Some(format!("message parse failured: {err}")),
-                                        response: None,
-                                    })
-                                    .expect("should convert to string"),
-                                );
+                                let _ = out_tx.send(WsMessage::Response(WsActionResponse {
+                                    request_id: None,
+                                    success: false,
+                                    message: Some(format!("message parse failured: {err}")),
+                                    response: None,
+                                }));
                             }
                         }
                     }
@@ -187,7 +180,7 @@ pub fn ws_single_call(Path(call_id): Path<String>, Query(query): Query<WsQuery>,
 
 pub struct WebsocketEventEmitter {
     emitter_id: EmitterId,
-    out_tx: UnboundedSender<String>,
+    out_tx: UnboundedSender<WsMessage>,
 }
 
 impl EventEmitter for WebsocketEventEmitter {
@@ -195,9 +188,8 @@ impl EventEmitter for WebsocketEventEmitter {
         self.emitter_id
     }
 
-    fn fire<E: Serialize>(&mut self, event: &E) {
-        let json_str = serde_json::to_string(event).expect("should convert to json");
-        if let Err(e) = self.out_tx.send(json_str) {
+    fn fire(&mut self, msg: WsMessage) {
+        if let Err(e) = self.out_tx.send(msg) {
             log::error!("[WebsocketEventEmitter] send event error {e:?}");
         }
     }

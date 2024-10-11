@@ -4,7 +4,6 @@ use anyhow::anyhow;
 use derive_more::derive::{Display, From};
 use incoming_call::IncomingCall;
 use outgoing_call::OutgoingCall;
-use serde::Serialize;
 use thiserror::Error;
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
@@ -16,7 +15,7 @@ use crate::{
     error::PrintErrorDetails,
     futures::select2,
     hook::HttpHook,
-    protocol::{CallActionRequest, CallActionResponse, CallApiError, CallDirection, CreateCallRequest, CreateCallResponse, InternalCallId},
+    protocol::{CallActionRequest, CallActionResponse, CallApiError, CallDirection, CreateCallRequest, CreateCallResponse, InternalCallId, WsMessage},
     secure::{CallToken, SecureContext},
     sip::{MediaApi, SipServer},
 };
@@ -43,7 +42,7 @@ pub enum EventEmitterError {
 
 pub trait EventEmitter: Send + Sync + 'static {
     fn emitter_id(&self) -> EmitterId;
-    fn fire<E: Serialize>(&mut self, event: &E);
+    fn fire(&mut self, event: WsMessage);
 }
 
 pub enum CallManagerOut {
