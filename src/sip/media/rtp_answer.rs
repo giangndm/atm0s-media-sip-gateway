@@ -36,7 +36,7 @@ impl MediaRtpEngineAnswer {
 
         let status = res.status().as_u16();
 
-        if status == 200 {
+        if status == 201 {
             let endpoint = res.headers().get("Location").ok_or(MediaEngineError::MissingLocation)?;
             let location = endpoint.to_str().map_err(|_e| MediaEngineError::InvalidLocation)?.to_string();
             let sdp: Bytes = res.bytes().await?;
@@ -44,7 +44,8 @@ impl MediaRtpEngineAnswer {
             self.created = Some((location, sdp.clone()));
             Ok(sdp)
         } else {
-            log::error!("[MediaRtpEngineAnswer] create answer error {status}");
+            let response = res.text().await?;
+            log::error!("[MediaRtpEngineAnswer] create answer error {status}, {response}");
             Err(MediaEngineError::InvalidStatus(status))
         }
     }

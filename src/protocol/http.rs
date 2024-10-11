@@ -1,5 +1,5 @@
 use poem_openapi::{Enum, Object};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use super::StreamingInfo;
 
@@ -17,5 +17,5 @@ pub struct CallActionRequest {
     pub stream: Option<StreamingInfo>,
 }
 
-#[derive(Debug, Object)]
+#[derive(Debug, Object, Serialize)]
 pub struct CallActionResponse {}

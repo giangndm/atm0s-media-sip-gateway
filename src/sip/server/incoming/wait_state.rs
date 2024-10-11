@@ -55,8 +55,8 @@ impl StateLogic for WaitState {
     }
 
     async fn accept(&mut self, _ctx: &mut Ctx, api: MediaApi, stream: StreamingInfo) -> Result<(), SipIncomingCallError> {
-        let acceptor = self.acceptor.take().expect("should have acceptor when start called");
-        let mut response = acceptor.create_response(Code::OK, None).await?;
+        log::info!("[IncomingCall/WaitState] accept");
+        let mut response = self.acceptor.as_mut().expect("should have acceptor when start called").create_response(Code::OK, None).await?;
 
         let mut rtp = MediaRtpEngineAnswer::new(api, self.offer_sdp.clone());
         let answer_sdp = rtp.create_answer(&stream).await?;
@@ -64,7 +64,7 @@ impl StateLogic for WaitState {
         response.msg.body = answer_sdp;
         response.msg.headers.insert_named(&ContentType(BytesStr::from_static("application/sdp")));
 
-        let (session, _) = acceptor.respond_success(response).await?;
+        let (session, _) = self.acceptor.take().expect("should have acceptor").respond_success(response).await?;
         self.tx
             .send(Some(StateOut::Switch(State::Talking(TalkingState::new(session, rtp)), IncomingCallEvent::Accepted)))
             .expect("should send to parent");
@@ -72,6 +72,7 @@ impl StateLogic for WaitState {
     }
 
     async fn end(&mut self, _ctx: &mut Ctx) -> Result<(), SipIncomingCallError> {
+        log::info!("[IncomingCall/WaitState] end");
         let acceptor = self.acceptor.take().expect("should have acceptor when start called");
         let response = acceptor.create_response(Code::BUSY_HERE, None).await?;
         acceptor.respond_failure(response).await?;

@@ -23,6 +23,8 @@ pub struct HookIncomingCallRequest {
     pub call_id: InternalCallId,
     pub from: String,
     pub to: String,
+    pub call_token: String,
+    pub ws: String,
 }
 
 pub type HookIncomingCallResponse = CallActionRequest;

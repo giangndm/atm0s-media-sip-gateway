@@ -16,7 +16,7 @@ use crate::{
     error::PrintErrorDetails,
     futures::select2,
     hook::HttpHook,
-    protocol::{CallActionRequest, CallApiError, CallDirection, CreateCallRequest, CreateCallResponse, InternalCallId},
+    protocol::{CallActionRequest, CallActionResponse, CallApiError, CallDirection, CreateCallRequest, CreateCallResponse, InternalCallId},
     secure::{CallToken, SecureContext},
     sip::{MediaApi, SipServer},
 };
@@ -106,29 +106,50 @@ impl<EM: EventEmitter> CallManager<EM> {
     }
 
     pub fn subscribe_call(&mut self, call: InternalCallId, emitter: EM) -> Result<(), CallApiError> {
-        let call = self.out_calls.get_mut(&call).ok_or(CallApiError::CallNotFound)?;
-        call.add_emitter(emitter);
-        Ok(())
-    }
-
-    pub fn unsubscribe_call(&mut self, call: InternalCallId, emitter: EmitterId) -> Result<(), CallApiError> {
-        let call = self.out_calls.get_mut(&call).ok_or(CallApiError::CallNotFound)?;
-        call.del_emitter(emitter);
-        Ok(())
-    }
-
-    pub fn action_call(&mut self, call: InternalCallId, req: CallActionRequest, tx: oneshot::Sender<anyhow::Result<()>>) {
-        if let Some(call) = self.in_calls.get_mut(&call) {
-            call.do_action(req, tx);
+        if let Some(call) = self.out_calls.get_mut(&call) {
+            call.add_emitter(emitter);
+            Ok(())
+        } else if let Some(call) = self.in_calls.get_mut(&call) {
+            call.add_emitter(emitter);
+            Ok(())
         } else {
-            tx.send(Err(anyhow!("call not found"))).print_error_detail("[CallManager] feedback action_call not found");
+            Err(CallApiError::CallNotFound)
         }
     }
 
+    pub fn unsubscribe_call(&mut self, call: InternalCallId, emitter: EmitterId) -> Result<(), CallApiError> {
+        if let Some(call) = self.out_calls.get_mut(&call) {
+            call.del_emitter(emitter);
+            Ok(())
+        } else if let Some(call) = self.in_calls.get_mut(&call) {
+            call.del_emitter(emitter);
+            Ok(())
+        } else {
+            Err(CallApiError::CallNotFound)
+        }
+    }
+
+    pub fn action_call(&mut self, call: InternalCallId, req: CallActionRequest, tx: oneshot::Sender<anyhow::Result<CallActionResponse>>) {
+        if let Some(_call) = self.out_calls.get_mut(&call) {
+            tx.send(Err(anyhow!("action_call not working with outgoing call")))
+                .print_error_detail("[CallManager] feedback action_call not working with outgoing call");
+        } else if let Some(call) = self.in_calls.get_mut(&call) {
+            call.do_action(req, tx);
+        } else {
+            tx.send(Err(anyhow!("call not found"))).print_error_detail("[CallManager] feedback action_call not found");
+        };
+    }
+
     pub fn end_call(&mut self, call: InternalCallId) -> Result<(), CallApiError> {
-        let call = self.out_calls.get_mut(&call).ok_or(CallApiError::CallNotFound)?;
-        call.end();
-        Ok(())
+        if let Some(call) = self.out_calls.get_mut(&call) {
+            call.end();
+            Ok(())
+        } else if let Some(call) = self.in_calls.get_mut(&call) {
+            call.end();
+            Ok(())
+        } else {
+            Err(CallApiError::CallNotFound)
+        }
     }
 
     pub async fn recv(&mut self) -> Option<CallManagerOut> {
@@ -146,8 +167,15 @@ impl<EM: EventEmitter> CallManager<EM> {
                     if let Some(number) = self.address_book.allow(call.remote(), call.from(), call.to()) {
                         let hook_sender = self.http_hook.new_sender(&number.hook, HashMap::new());
                         let call_id = call.call_id();
+                        let call_token = self.secure_ctx.encode_token(
+                            CallToken {
+                                direction: CallDirection::Outgoing,
+                                call_id: call_id.clone(),
+                            },
+                            3600,
+                        );
                         let api: MediaApi = MediaApi::new(&self.media_gateway, &number.app_secret);
-                        let call = IncomingCall::new(api, call, self.destroy_tx.clone(), hook_sender);
+                        let call = IncomingCall::new(api, call, call_token, self.destroy_tx.clone(), hook_sender);
                         self.in_calls.insert(call_id, call);
                         Some(CallManagerOut::IncomingCall())
                     } else {

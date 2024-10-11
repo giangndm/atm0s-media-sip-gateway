@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::{
     call_manager::{EmitterId, EventEmitter},
     futures::select2::{self, OrOutput},
-    protocol::InternalCallId,
+    protocol::{CallActionRequest, CallActionResponse, InternalCallId},
     secure::SecureContext,
 };
 
@@ -35,6 +35,20 @@ pub struct WsQuery {
     token: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct WsActionRequest {
+    request_id: u32,
+    request: CallActionRequest,
+}
+
+#[derive(Debug, Serialize, Default)]
+pub struct WsActionResponse {
+    request_id: Option<u32>,
+    success: bool,
+    message: Option<String>,
+    response: Option<CallActionResponse>,
+}
+
 #[handler]
 pub fn ws_single_call(Path(call_id): Path<String>, Query(query): Query<WsQuery>, ws: WebSocket, data: Data<&WebsocketCtx>) -> impl IntoResponse {
     let token = query.token;
@@ -53,11 +67,11 @@ pub fn ws_single_call(Path(call_id): Path<String>, Query(query): Query<WsQuery>,
         let call_id: InternalCallId = call_id.into();
         let (out_tx, mut out_rx) = unbounded_channel();
         let _out_tx = out_tx.clone(); //we need to store it for avoiding ws error when call dropped
-        let emitter = WebsocketEventEmitter { emitter_id, out_tx };
+        let emitter = WebsocketEventEmitter { emitter_id, out_tx: out_tx.clone() };
 
         let (tx, rx) = oneshot::channel();
         if let Err(e) = cmd_tx.send(HttpCommand::SubscribeCall(call_id.clone(), emitter, tx)).await {
-            log::error!("[WsCall {emitter_id}] send sub_cmd error {e:?}");
+            log::error!("[WsCall {call_id}/{emitter_id}] send sub_cmd error {e:?}");
             return;
         }
 
@@ -65,12 +79,12 @@ pub fn ws_single_call(Path(call_id): Path<String>, Query(query): Query<WsQuery>,
             Ok(res) => match res {
                 Ok(_) => {}
                 Err(err) => {
-                    log::error!("[WsCall {emitter_id}] sub_cmd got error {err:?}");
+                    log::error!("[WsCall {call_id}/{emitter_id}] sub_cmd got error {err:?}");
                     return;
                 }
             },
             Err(err) => {
-                log::error!("[WsCall {emitter_id}] send sub_cmd error {err:?}");
+                log::error!("[WsCall {call_id}/{emitter_id}] send sub_cmd error {err:?}");
                 return;
             }
         }
@@ -80,18 +94,69 @@ pub fn ws_single_call(Path(call_id): Path<String>, Query(query): Query<WsQuery>,
             match out {
                 OrOutput::Left(Some(out)) => {
                     if let Err(e) = sink.send(Message::Text(out)).await {
-                        log::error!("[WsCall {emitter_id}] send data error {e:?}");
+                        log::error!("[WsCall {call_id}/{emitter_id}] send data error {e:?}");
                         break;
                     }
                 }
                 OrOutput::Left(_) => {
                     break;
                 }
-                OrOutput::Right(Some(Ok(_))) => {
-                    log::info!("[WsCall {emitter_id}] received data");
+                OrOutput::Right(Some(Ok(message))) => {
+                    if let Message::Text(msg) = message {
+                        match serde_json::from_str::<WsActionRequest>(&msg) {
+                            Ok(req) => {
+                                log::error!("[WsCall {call_id}/{emitter_id}] on incoming req {} {:?}", req.request_id, req.request);
+                                let (tx, rx) = oneshot::channel();
+                                let out_tx = out_tx.clone();
+                                let cmd_tx = cmd_tx.clone();
+                                let call_id = call_id.clone();
+                                tokio::spawn(async move {
+                                    let res = if let Err(err) = cmd_tx.send(HttpCommand::ActionCall(call_id.clone(), req.request, tx)).await {
+                                        log::error!("[WsCall {call_id}/{emitter_id}] send ws action error {err:?}");
+                                        Err(format!("server error: {err}"))
+                                    } else {
+                                        match rx.await {
+                                            Ok(res) => res.map_err(|e| e.to_string()),
+                                            Err(err) => Err(format!("server error: {err}")),
+                                        }
+                                    };
+
+                                    let res = match res {
+                                        Ok(res) => WsActionResponse {
+                                            request_id: Some(req.request_id),
+                                            success: true,
+                                            response: Some(res),
+                                            ..Default::default()
+                                        },
+                                        Err(err) => WsActionResponse {
+                                            request_id: Some(req.request_id),
+                                            success: false,
+                                            message: Some(err),
+                                            ..Default::default()
+                                        },
+                                    };
+                                    log::info!("[WsCall {call_id}/{emitter_id}] response incoming req {} {res:?}", req.request_id);
+                                    let _ = out_tx.send(serde_json::to_string(&res).expect("should parse to json"));
+                                });
+                            }
+                            Err(err) => {
+                                log::error!("[WsCall {call_id}/{emitter_id}] parse incoming req {msg} error {err}");
+                                let _ = out_tx.send(
+                                    serde_json::to_string(&WsActionResponse {
+                                        request_id: None,
+                                        success: false,
+                                        message: Some(format!("message parse failured: {err}")),
+                                        response: None,
+                                    })
+                                    .expect("should convert to string"),
+                                );
+                            }
+                        }
+                    }
+                    log::info!("[WsCall {call_id}/{emitter_id}] received data");
                 }
                 OrOutput::Right(_) => {
-                    log::info!("[WsCall {emitter_id}] socket closed");
+                    log::info!("[WsCall {call_id}/{emitter_id}] socket closed");
                     break;
                 }
             }
@@ -99,7 +164,7 @@ pub fn ws_single_call(Path(call_id): Path<String>, Query(query): Query<WsQuery>,
 
         let (tx, rx) = oneshot::channel();
         if let Err(e) = cmd_tx.send(HttpCommand::UnsubscribeCall(call_id.clone(), emitter_id, tx)).await {
-            log::error!("[WsCall {emitter_id}] send sub_cmd error {e:?}");
+            log::error!("[WsCall {call_id}/{emitter_id}] send sub_cmd error {e:?}");
             return;
         }
 
@@ -107,12 +172,12 @@ pub fn ws_single_call(Path(call_id): Path<String>, Query(query): Query<WsQuery>,
             Ok(res) => match res {
                 Ok(_) => {}
                 Err(err) => {
-                    log::error!("[WsCall {emitter_id}] sub_cmd got error {err:?}");
+                    log::error!("[WsCall {call_id}/{emitter_id}] sub_cmd got error {err:?}");
                     return;
                 }
             },
             Err(err) => {
-                log::error!("[WsCall {emitter_id}] send sub_cmd error {err:?}");
+                log::error!("[WsCall {call_id}/{emitter_id}] send sub_cmd error {err:?}");
                 return;
             }
         }

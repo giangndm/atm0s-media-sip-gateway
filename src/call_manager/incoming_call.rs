@@ -10,7 +10,7 @@ use crate::{
     error::PrintErrorDetails,
     futures::select2,
     hook::HttpHookSender,
-    protocol::{CallAction, CallActionRequest, HookIncomingCallRequest, HookIncomingCallResponse, IncomingCallEvent, InternalCallId},
+    protocol::{CallAction, CallActionRequest, CallActionResponse, HookIncomingCallRequest, HookIncomingCallResponse, IncomingCallEvent, InternalCallId},
     sip::{MediaApi, SipIncomingCall, SipIncomingCallOut},
 };
 
@@ -21,11 +21,11 @@ pub struct IncomingCall<EM> {
 }
 
 impl<EM: EventEmitter> IncomingCall<EM> {
-    pub fn new(api: MediaApi, sip: SipIncomingCall, destroy_tx: UnboundedSender<InternalCallId>, hook: HttpHookSender) -> Self {
+    pub fn new(api: MediaApi, sip: SipIncomingCall, call_token: String, destroy_tx: UnboundedSender<InternalCallId>, hook: HttpHookSender) -> Self {
         let (control_tx, control_rx) = unbounded_channel();
         tokio::spawn(async move {
             let call_id = sip.call_id();
-            if let Err(e) = run_call_loop(api, sip, control_rx, hook).await {
+            if let Err(e) = run_call_loop(api, sip, call_token, control_rx, hook).await {
                 log::error!("[IncomingCall] call {call_id} error {e:?}");
             }
             destroy_tx.send(call_id).expect("should send destroy request to main loop");
@@ -46,7 +46,7 @@ impl<EM: EventEmitter> IncomingCall<EM> {
         }
     }
 
-    pub fn do_action(&mut self, action: CallActionRequest, tx: oneshot::Sender<anyhow::Result<()>>) {
+    pub fn do_action(&mut self, action: CallActionRequest, tx: oneshot::Sender<anyhow::Result<CallActionResponse>>) {
         if let Err(e) = self.control_tx.send(CallControl::Action(action, tx)) {
             log::error!("[IncomingCall] send Unsub control error {e:?}");
         }
@@ -62,24 +62,34 @@ impl<EM: EventEmitter> IncomingCall<EM> {
 enum CallControl<EM> {
     Sub(EM),
     Unsub(EmitterId),
-    Action(CallActionRequest, oneshot::Sender<anyhow::Result<()>>),
+    Action(CallActionRequest, oneshot::Sender<anyhow::Result<CallActionResponse>>),
     End,
 }
 
-async fn run_call_loop<EM: EventEmitter>(api: MediaApi, mut call: SipIncomingCall, mut control_rx: UnboundedReceiver<CallControl<EM>>, hook: HttpHookSender) -> anyhow::Result<()> {
+async fn run_call_loop<EM: EventEmitter>(api: MediaApi, mut call: SipIncomingCall, call_token: String, mut control_rx: UnboundedReceiver<CallControl<EM>>, hook: HttpHookSender) -> anyhow::Result<()> {
     let call_id = call.call_id();
     let from = call.from().to_owned();
     let to = call.to().to_owned();
 
     let mut emitters: HashMap<EmitterId, EM> = HashMap::new();
-
-    log::info!("[IncomingCall] call starting");
+    let ws = format!("/ws/call/{call_id}?token={call_token}");
+    log::info!("[IncomingCall] call {call_id} start, ws: {ws}, sending hook ...");
 
     // we send trying first
     call.send_trying().await?;
 
     // feedback hook for info
-    let res: HookIncomingCallResponse = hook.request(&HookIncomingCallRequest { call_id, from, to }).await?;
+    let res: HookIncomingCallResponse = hook
+        .request(&HookIncomingCallRequest {
+            call_id: call_id.clone(),
+            from,
+            to,
+            ws,
+            call_token,
+        })
+        .await?;
+
+    log::info!("[IncomingCall] call {call_id} got hook action {:?}", res.action);
 
     match res.action {
         CallAction::Trying => {}
@@ -94,7 +104,7 @@ async fn run_call_loop<EM: EventEmitter>(api: MediaApi, mut call: SipIncomingCal
         }
     };
 
-    log::info!("[IncomingCall] call started");
+    log::info!("[IncomingCall] call {call_id} started loop");
 
     loop {
         let out = select2::or(call.recv(), control_rx.recv()).await;
@@ -109,11 +119,11 @@ async fn run_call_loop<EM: EventEmitter>(api: MediaApi, mut call: SipIncomingCal
                 SipIncomingCallOut::Continue => {}
             },
             select2::OrOutput::Left(Ok(None)) => {
-                log::info!("[IncomingCall] call end");
+                log::info!("[IncomingCall] call {call_id} end");
                 break;
             }
             select2::OrOutput::Left(Err(e)) => {
-                log::error!("[IncomingCall] call error {e:?}");
+                log::error!("[IncomingCall] call {call_id} error {e:?}");
                 let event = IncomingCallEvent::Error { message: e.to_string() };
 
                 for emitter in emitters.values_mut() {
@@ -129,18 +139,18 @@ async fn run_call_loop<EM: EventEmitter>(api: MediaApi, mut call: SipIncomingCal
                 CallControl::Unsub(emitter_id) => {
                     if emitters.remove(&emitter_id).is_some() {
                         if emitters.is_empty() {
-                            log::info!("[IncomingCall] all sub disconnected => end call");
+                            log::info!("[IncomingCall] call {call_id} all subs disconnected => end call");
                             if let Err(e) = call.end().await {
-                                log::error!("[IncomingCall] end call error {e:?}");
+                                log::error!("[IncomingCall] call {call_id} end error {e:?}");
                             }
                             break;
                         }
                     }
                 }
                 CallControl::End => {
-                    log::info!("[IncomingCall] received end request");
+                    log::info!("[IncomingCall] call {call_id} received end request");
                     if let Err(e) = call.end().await {
-                        log::error!("[IncomingCall] end call error {e:?}");
+                        log::error!("[IncomingCall] call {call_id} end error {e:?}");
                     }
                     break;
                 }
@@ -157,7 +167,7 @@ async fn run_call_loop<EM: EventEmitter>(api: MediaApi, mut call: SipIncomingCal
                             }
                         }
                     };
-                    tx.send(res).print_error_detail("[IncomingCall] send action res");
+                    tx.send(res.map(|_| CallActionResponse {})).print_error_detail("[IncomingCall] send action res");
                 }
             },
             select2::OrOutput::Right(None) => {
@@ -166,7 +176,7 @@ async fn run_call_loop<EM: EventEmitter>(api: MediaApi, mut call: SipIncomingCal
         }
     }
 
-    log::info!("[IncomingCall] call destroyed");
+    log::info!("[IncomingCall] call {call_id} destroyed");
     let event = IncomingCallEvent::Destroyed;
     for emitter in emitters.values_mut() {
         emitter.fire(&event);
