@@ -2,92 +2,53 @@
 
 ## Overview
 
-This project is a SIP (Session Initiation Protocol) gateway designed for the atm0s media server. It facilitates the handling of SIP calls, including incoming and outgoing call management, media handling, and integration with an address book for phone number synchronization. The gateway is built using Rust and leverages asynchronous programming with the Tokio runtime.
+This project implements a SIP gateway in Rust, using Tokio for asynchronous operations. It's designed to manage SIP calls, handle media streams, and synchronize with an address book.  Key features include incoming/outgoing call management, media handling via a media server, address book integration, secure tokens, WebSocket support, and incoming call handling via WebSockets.
 
-## Features
+## Inputs
 
-- **SIP Call Management**: Supports both incoming and outgoing SIP calls.
-- **Media Handling**: Integrates with media servers for RTP (Real-time Transport Protocol) handling.
-- **Address Book Synchronization**: Syncs phone numbers from a specified source.
-- **Secure Context**: Utilizes secure tokens for authentication and authorization.
-- **WebSocket Support**: Provides WebSocket endpoints for real-time communication.
-- **Incoming Call Handling**: Allows receiving incoming calls with WebSocket.
+### Create Call Request
 
-## Getting Started
+To initiate a call, the following information is required:
 
-### Prerequisites
+*   **sip_server:** The address of the SIP server.
+*   **sip_auth (optional):** SIP authentication credentials (username, password).
+*   **from_number:** The originating phone number.
+*   **to_number:** The destination phone number.
+*   **hook:** A URL for receiving call event notifications (webhooks).
+*   **streaming:** Information for media streaming (room, peer, record).
 
-- Rust (version 1.56 or higher)
-- Cargo (Rust package manager)
-- A compatible media server
+### Incoming Call
 
-### Installation from docker, prebuilt
+Incoming calls trigger events that require specific actions. The gateway expects responses to these events to manage the call flow.  These actions include `Ring`, `Accept`, and `End`.
 
-TODO
+*   **Ring:** Signals the call is ringing.
+*   **Accept:** Accepts the incoming call and provides streaming information.
+*   **End:** Terminates the call.
 
-### Installation from source
+## Outputs
 
-1. Clone the repository:
-2. Build the project:
+### Create Call Response
 
-   ```bash
-   cargo build --release
-   ```
+A successful create call request returns:
 
-3. Run the server:
+*   **call_id:** A unique identifier for the call.
+*   **call_token:** A secure token for WebSocket communication.
+*   **call_ws:** The WebSocket URL for interacting with the call.
 
-   ```bash
-   cargo run --release
-   ```
+### Call Events
 
-### Configuration
+Throughout the call lifecycle, various events are emitted via WebSockets and webhooks.  These events provide updates on the call status. Examples include:
 
-The server can be configured using command-line arguments or environment variables. The following parameters are available:
+*   **Outgoing Call Events:** `Provisional`, `Early`, `Accepted`, `Failure`, `Bye`, `Ended`, `Error`.
+*   **Incoming Call Events:** `Cancelled`, `Bye`, `Accepted`, `Ended`, `Error`.
+*   **Incoming Call Notifications:** `CallArrived`, `CallCancelled`, `CallAccepted`.
 
-- `--http-addr`: Address for the HTTP server (default: `0.0.0.0:8008`)
-- `--http-public`: Public URL for the HTTP server (default: `http://127.0.0.1:8008`)
-- `--sip-addr`: Address for the SIP server (default: `0.0.0.0:5060`)
-- `--secret`: Secret for the gateway (default: `insecure`)
-- `--phone-numbers-sync`: Address for phone book synchronization (optional)
-- `--phone-numbers-sync-interval-ms`: Interval for phone book synchronization in milliseconds (default: `30000`)
-- `--http-hook-queues`: Number of HTTP hook queues (default: `20`)
-- `--media-gateway`: Address for the media server gateway (required)
-- `--media-app-sync`: Address for media server apps synchronization (optional)
+### Errors
 
-### Example Usage
+Errors are returned as JSON objects with a `status` field set to `false` and an `error` field containing a description of the error.  Possible errors include:
 
-To start the server with custom configurations, you can run:
-
-```bash
-cargo run --release -- --http 0.0.0.0:8080 --sip 0.0.0.0:5070 --secret mysecret --media-gateway http://media-server
-```
-
-## API Documentation
-
-The project uses the `poem_openapi` crate to provide API documentation. You can access the API documentation at the following endpoint:
-
-```
-http://<your-server-address>/docs
-```
-
-## Contributing
-
-Contributions are welcome! If you have suggestions for improvements or new features, please open an issue or submit a pull request.
-
-1. Fork the repository.
-2. Create a new branch for your feature or bug fix.
-3. Make your changes and commit them.
-4. Push to your branch and create a pull request.
-
-## License
-
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
-
-## Acknowledgments
-
-- Thanks to the Rust community for their support and contributions.
-- Special thanks to the maintainers of the libraries used in this project.
-
----
-
-Feel free to customize this README further based on your project's specific needs and details!
+*   **BadRequest:** Indicates an invalid request format.
+*   **WrongSecret:**  An incorrect application secret was provided.
+*   **WrongToken:** An invalid or expired call token was used.
+*   **SipError:** An error occurred within the SIP stack.
+*   **InternalChannel:** An internal communication error occurred.
